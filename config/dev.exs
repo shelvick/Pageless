@@ -1,0 +1,30 @@
+import Config
+
+config :pageless, Pageless.Repo,
+  username: "postgres",
+  password: "postgres",
+  hostname: "localhost",
+  database: "pageless_dev",
+  pool_size: 10,
+  show_sensitive_data_on_connection_error: true
+
+config :pageless, PagelessWeb.Endpoint,
+  http: [ip: {127, 0, 0, 1}, port: 4040],
+  check_origin: false,
+  code_reloader: true,
+  debug_errors: true,
+  secret_key_base:
+    "dev-key-base-min-64-chars-replace-prod-replace-prod-replace-prod-replace-prod",
+  watchers: []
+
+config :pageless, PagelessWeb.Endpoint,
+  live_reload: [
+    patterns: [
+      ~r"priv/static/(?!uploads/).*(js|css|png|jpeg|jpg|gif|svg)$",
+      ~r"lib/pageless_web/(controllers|live|components)/.*(ex|heex)$"
+    ]
+  ]
+
+config :logger, :default_formatter, format: "[$level] $message\n"
+config :phoenix, :stacktrace_depth, 20
+config :phoenix, :plug_init_mode, :runtime
