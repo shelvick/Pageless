@@ -1,0 +1,53 @@
+{
+  "version": "4",
+  "groupKey": "{}/{alertname=\"PagelessBatch\"}:{}",
+  "truncatedAlerts": 0,
+  "status": "firing",
+  "receiver": "pageless-webhook",
+  "groupLabels": {
+    "alertname": "PagelessBatch"
+  },
+  "commonLabels": {
+    "severity": "warning"
+  },
+  "commonAnnotations": {
+    "summary": "Multiple pageless alerts"
+  },
+  "externalURL": "https://alertmanager.example",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "HighLatency",
+        "instance": "payments-api-7f6d9c8b9f-r2k4p",
+        "severity": "warning",
+        "service": "payments-api"
+      },
+      "annotations": {
+        "summary": "payments-api p95 latency above SLO",
+        "description": "Latency stayed above 1500ms for five minutes"
+      },
+      "startsAt": "2026-05-13T03:45:00Z",
+      "endsAt": "0001-01-01T00:00:00Z",
+      "generatorURL": "https://prometheus.example/graph?g0.expr=histogram_quantile",
+      "fingerprint": "latency001"
+    },
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "DBConnectionPoolExhausted",
+        "instance": "postgres-0",
+        "severity": "high",
+        "service": "orders-db"
+      },
+      "annotations": {
+        "summary": "orders-db connection pool exhausted",
+        "description": "Pool saturation crossed 95 percent"
+      },
+      "startsAt": "2026-05-13T03:45:30Z",
+      "endsAt": "0001-01-01T00:00:00Z",
+      "generatorURL": "https://prometheus.example/graph?g0.expr=db_pool_used",
+      "fingerprint": "dbpool002"
+    }
+  ]
+}

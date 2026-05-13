@@ -1,0 +1,27 @@
+{
+  "event": {
+    "id": "01JVA6S8Y5S0QK7F9A0PWT2001",
+    "event_type": "incident.triggered",
+    "resource_type": "incident",
+    "occurred_at": "2026-05-13T03:44:30Z",
+    "agent": null,
+    "client": null,
+    "data": {
+      "id": "PXYZ123",
+      "type": "incident",
+      "self": "https://api.pagerduty.com/incidents/PXYZ123",
+      "html_url": "https://acme.pagerduty.com/incidents/PXYZ123",
+      "number": 1234,
+      "status": "triggered",
+      "title": "payments-api latency creep",
+      "service": {
+        "id": "PSVC1",
+        "summary": "payments-api"
+      },
+      "urgency": "high",
+      "priority": {
+        "summary": "P1"
+      }
+    }
+  }
+}

@@ -16,8 +16,20 @@ defmodule PagelessWeb.Router do
     plug(:put_secure_browser_headers)
   end
 
+  pipeline :webhooks do
+    plug(:accepts, ["json"])
+    plug(PagelessWeb.Plugs.InjectPubSub)
+  end
+
   scope "/", PagelessWeb do
     pipe_through(:browser)
     get("/", PageController, :home)
+  end
+
+  scope "/webhook", PagelessWeb do
+    pipe_through(:webhooks)
+
+    post("/alertmanager", AlertmanagerWebhookController, :create)
+    post("/pagerduty-events-v2", PagerDutyWebhookController, :create)
   end
 end
