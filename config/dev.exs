@@ -15,7 +15,10 @@ config :pageless, PagelessWeb.Endpoint,
   debug_errors: true,
   secret_key_base:
     "dev-key-base-min-64-chars-replace-prod-replace-prod-replace-prod-replace-prod",
-  watchers: []
+  watchers: [
+    esbuild: {Esbuild, :install_and_run, [:pageless, ~w(--sourcemap=inline --watch)]},
+    tailwind: {Tailwind, :install_and_run, [:pageless, ~w(--watch)]}
+  ]
 
 config :pageless, PagelessWeb.Endpoint,
   live_reload: [
@@ -28,3 +31,6 @@ config :pageless, PagelessWeb.Endpoint,
 config :logger, :default_formatter, format: "[$level] $message\n"
 config :phoenix, :stacktrace_depth, 20
 config :phoenix, :plug_init_mode, :runtime
+
+# Enable once a local filesystem MCP server command is installed.
+config :pageless, :mcp_filesystem, :disabled
