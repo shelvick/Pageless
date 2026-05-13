@@ -23,6 +23,13 @@ defmodule Pageless.MixProject do
 
   defp aliases do
     [
+      "assets.setup": ["esbuild.install --if-missing", "tailwind.install --if-missing"],
+      "assets.build": ["esbuild pageless", "tailwind pageless"],
+      "assets.deploy": [
+        "esbuild pageless --minify",
+        "tailwind pageless --minify",
+        "phx.digest"
+      ],
       test: ["ecto.create --quiet", "ecto.migrate --quiet", "test"]
     ]
   end
@@ -65,8 +72,8 @@ defmodule Pageless.MixProject do
       # SQL structural parser (GATE_SQLSelectOnlyParser)
       {:pg_query_ex, "~> 0.5"},
 
-      # MCP client (Day 4) — deferred
-      # {:anubis_mcp, ...}
+      # MCP client (Day 4)
+      {:anubis_mcp, "~> 1.5"},
 
       # Dev reload + asset pipeline
       {:phoenix_live_reload, "~> 1.5", only: :dev},
@@ -78,7 +85,8 @@ defmodule Pageless.MixProject do
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:mix_audit, "~> 2.0", only: [:dev, :test], runtime: false},
       {:hammox, "~> 0.7", only: :test},
-      {:req_cassette, "~> 0.4", only: :test}
+      {:req_cassette, "~> 0.4", only: :test},
+      {:lazy_html, ">= 0.1.0", only: :test}
     ]
   end
 end

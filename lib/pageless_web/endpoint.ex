@@ -2,9 +2,7 @@ defmodule PagelessWeb.Endpoint do
   @moduledoc """
   Phoenix endpoint for the operator dashboard + alert webhooks.
 
-  Day 1: serves the scaffold home page and provides the LiveView socket.
-  Webhook routes (`API_PagerDutyWebhook`, `API_AlertmanagerWebhook`,
-  `API_FireTestAlert`) land in their respective Change Sets.
+  Serves the operator dashboard, webhook routes, and LiveView socket.
   """
   use Phoenix.Endpoint, otp_app: :pageless
 
@@ -15,7 +13,10 @@ defmodule PagelessWeb.Endpoint do
     same_site: "Lax"
   ]
 
-  socket("/live", Phoenix.LiveView.Socket, websocket: [connect_info: [session: @session_options]])
+  socket("/live", Phoenix.LiveView.Socket,
+    websocket: [connect_info: [session: @session_options]],
+    longpoll: [connect_info: [session: @session_options]]
+  )
 
   plug(Plug.Static,
     at: "/",

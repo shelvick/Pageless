@@ -7,6 +7,7 @@ defmodule PagelessWeb.Router do
   """
   use Phoenix.Router
   import Phoenix.Controller
+  import Phoenix.LiveView.Router
   import Plug.Conn
 
   pipeline :browser do
@@ -23,7 +24,10 @@ defmodule PagelessWeb.Router do
 
   scope "/", PagelessWeb do
     pipe_through(:browser)
-    get("/", PageController, :home)
+
+    live_session :default, root_layout: {PagelessWeb.Layouts, :root} do
+      live("/", OperatorDashboardLive, :index)
+    end
   end
 
   scope "/webhook", PagelessWeb do
