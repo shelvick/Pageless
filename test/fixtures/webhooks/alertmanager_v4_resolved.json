@@ -1,0 +1,38 @@
+{
+  "version": "4",
+  "groupKey": "{}/{alertname=\"PaymentsAPIDown\"}:{}",
+  "truncatedAlerts": 0,
+  "status": "resolved",
+  "receiver": "pageless-webhook",
+  "groupLabels": {
+    "alertname": "PaymentsAPIDown"
+  },
+  "commonLabels": {
+    "alertname": "PaymentsAPIDown",
+    "severity": "critical",
+    "service": "payments-api"
+  },
+  "commonAnnotations": {
+    "summary": "payments-api recovered"
+  },
+  "externalURL": "https://alertmanager.example",
+  "alerts": [
+    {
+      "status": "resolved",
+      "labels": {
+        "alertname": "PaymentsAPIDown",
+        "instance": "payments-api-7f6d9c8b9f-r2k4p",
+        "severity": "critical",
+        "service": "payments-api"
+      },
+      "annotations": {
+        "summary": "payments-api recovered",
+        "description": "payments-api health check is passing again"
+      },
+      "startsAt": "2026-05-13T03:44:12Z",
+      "endsAt": "2026-05-13T03:48:01Z",
+      "generatorURL": "https://prometheus.example/graph?g0.expr=up%7Bservice%3D%22payments-api%22%7D+%3D%3D+0",
+      "fingerprint": "abc123paymentsdown"
+    }
+  ]
+}

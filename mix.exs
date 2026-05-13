@@ -16,7 +16,14 @@ defmodule Pageless.MixProject do
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       listeners: [Phoenix.CodeReloader],
-      deps: deps()
+      deps: deps(),
+      aliases: aliases()
+    ]
+  end
+
+  defp aliases do
+    [
+      test: ["ecto.create --quiet", "ecto.migrate --quiet", "test"]
     ]
   end
 
@@ -50,6 +57,7 @@ defmodule Pageless.MixProject do
       {:jason, "~> 1.4"},
       {:yaml_elixir, "~> 2.12"},
       {:ex_json_schema, "~> 0.10"},
+      {:gemini_ex, "~> 0.13.0"},
 
       # Agent-tree viz
       {:live_flow, "~> 0.2.3"},

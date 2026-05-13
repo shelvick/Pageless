@@ -1,0 +1,41 @@
+{
+  "version": "4",
+  "groupKey": "{}/{alertname=\"PaymentsAPIDown\"}:{}",
+  "truncatedAlerts": 0,
+  "status": "firing",
+  "receiver": "pageless-webhook",
+  "groupLabels": {
+    "alertname": "PaymentsAPIDown"
+  },
+  "commonLabels": {
+    "alertname": "PaymentsAPIDown",
+    "severity": "critical",
+    "service": "payments-api",
+    "version": "v2.4.1"
+  },
+  "commonAnnotations": {
+    "summary": "payments-api health check failing",
+    "description": "payments-api has been unreachable since deploy v2.4.1"
+  },
+  "externalURL": "https://alertmanager.example",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "PaymentsAPIDown",
+        "instance": "payments-api-7f6d9c8b9f-r2k4p",
+        "severity": "critical",
+        "service": "payments-api",
+        "version": "v2.4.1"
+      },
+      "annotations": {
+        "summary": "payments-api health check failing",
+        "description": "payments-api has been unreachable since deploy v2.4.1"
+      },
+      "startsAt": "2026-05-13T03:44:12Z",
+      "endsAt": "0001-01-01T00:00:00Z",
+      "generatorURL": "https://prometheus.example/graph?g0.expr=up%7Bservice%3D%22payments-api%22%7D+%3D%3D+0",
+      "fingerprint": "abc123paymentsdown"
+    }
+  ]
+}
