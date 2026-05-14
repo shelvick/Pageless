@@ -86,7 +86,8 @@ defmodule Pageless.MixProject do
       {:mix_audit, "~> 2.0", only: [:dev, :test], runtime: false},
       {:hammox, "~> 0.7", only: :test},
       {:req_cassette, "~> 0.4", only: :test},
-      {:lazy_html, ">= 0.1.0", only: :test}
+      {:lazy_html, ">= 0.1.0", only: :test},
+      {:stream_data, "~> 1.0", only: :test}
     ]
   end
 end

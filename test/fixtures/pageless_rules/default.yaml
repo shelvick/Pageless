@@ -1,0 +1,29 @@
+capability_classes:
+  read:            { auto: true,  audit: false, gated: false }
+  write_dev:       { auto: true,  audit: true,  gated: false }
+  write_prod_low:  { auto: true,  audit: true,  gated: false }
+  write_prod_high: { auto: false, audit: true,  gated: true  }
+
+kubectl_verbs:
+  read:            [get, logs, describe, events, top]
+  write_dev:       []
+  write_prod_low:  [rollout restart, scale-up]
+  write_prod_high: [rollout undo, delete, scale-down, scale, apply, exec]
+
+function_blocklist:
+  - pg_terminate_backend
+  - pg_cancel_backend
+  - pg_advisory_lock
+  - pg_advisory_lock_shared
+  - pg_advisory_unlock
+  - pg_advisory_unlock_all
+  - pg_drop_replication_slot
+  - pg_create_replication_slot
+  - pg_replication_origin_create
+  - pg_replication_origin_drop
+  - pg_replication_origin_advance
+  - dblink_exec
+  - dblink
+
+investigator_profiles: {}
+alert_class_routing: {}
