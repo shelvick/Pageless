@@ -25,6 +25,7 @@ defmodule Pageless.Application do
              [[pubsub: Pageless.PubSub, tree: Pageless.AlertTree, name: Pageless.AlertIntake]]}
         },
         {Pageless.Conductor.DemoConductor, pubsub: Pageless.PubSub},
+        {Task.Supervisor, name: Pageless.TaskSupervisor},
         PagelessWeb.Endpoint
       ]
       |> append_mcp_filesystem(Application.get_env(:pageless, :mcp_filesystem, :disabled))
