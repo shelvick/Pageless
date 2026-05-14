@@ -208,13 +208,14 @@ defmodule Pageless.Config.RulesTest do
       end
     end
 
-    test "defaults absent routing, profile, and kubectl sections to empty maps" do
+    test "defaults absent routing, profile, kubectl, and query_db sections to empty maps" do
       rules = Rules.validate!(valid_rules_map())
 
       assert rules.__struct__ == Rules
       assert rules.investigator_profiles == %{}
       assert rules.alert_class_routing == %{}
       assert rules.kubectl_config == %{}
+      assert rules.query_db_config == %{}
     end
 
     test "preserves present kubectl config map with string keys" do
@@ -228,6 +229,21 @@ defmodule Pageless.Config.RulesTest do
     test "raises when kubectl config is not a map" do
       assert_raise ArgumentError, ~r/kubectl_config must be a map/, fn ->
         valid_rules_map(%{"kubectl" => "not a map"})
+        |> Rules.validate!()
+      end
+    end
+
+    test "preserves present query_db config map with string keys" do
+      query_db_config = %{"statement_timeout_ms" => 5_000, "max_rows" => 100}
+
+      rules = Rules.validate!(valid_rules_map(%{"query_db" => query_db_config}))
+
+      assert rules.query_db_config == query_db_config
+    end
+
+    test "raises when query_db config is not a map" do
+      assert_raise ArgumentError, ~r/query_db_config must be a map/, fn ->
+        valid_rules_map(%{"query_db" => ["not", "a", "map"]})
         |> Rules.validate!()
       end
     end

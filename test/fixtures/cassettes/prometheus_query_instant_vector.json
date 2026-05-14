@@ -1,0 +1,37 @@
+{
+  "version": "1.0",
+  "interactions": [
+    {
+      "request": {
+        "method": "POST",
+        "uri": "http://prometheus.test/api/v1/query",
+        "query_string": "",
+        "headers": {},
+        "body_type": "text",
+        "body": "query=up%7Bservice%3D%22payments-api%22%7D"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": ["application/json"]
+        },
+        "body_type": "json",
+        "body_json": {
+          "status": "success",
+          "data": {
+            "resultType": "vector",
+            "result": [
+              {
+                "metric": {
+                  "service": "payments-api"
+                },
+                "value": [1715647641.123, "1"]
+              }
+            ]
+          }
+        }
+      },
+      "recorded_at": "2026-05-14T00:00:00Z"
+    }
+  ]
+}
