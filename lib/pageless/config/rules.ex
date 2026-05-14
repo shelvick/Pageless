@@ -10,7 +10,8 @@ defmodule Pageless.Config.Rules do
     :function_blocklist,
     investigator_profiles: %{},
     alert_class_routing: %{},
-    kubectl_config: %{}
+    kubectl_config: %{},
+    query_db_config: %{}
   ]
 
   @class_names ~w(read write_dev write_prod_low write_prod_high)
@@ -35,7 +36,8 @@ defmodule Pageless.Config.Rules do
           function_blocklist: [String.t()],
           investigator_profiles: map(),
           alert_class_routing: map(),
-          kubectl_config: map()
+          kubectl_config: map(),
+          query_db_config: map()
         }
 
   @doc "Loads rules from a YAML file and validates the parsed shape."
@@ -61,7 +63,8 @@ defmodule Pageless.Config.Rules do
         validate_string_list!(Map.fetch!(parsed, "function_blocklist"), "function_blocklist"),
       investigator_profiles: validate_optional_map!(parsed, "investigator_profiles"),
       alert_class_routing: validate_optional_map!(parsed, "alert_class_routing"),
-      kubectl_config: validate_optional_map!(parsed, "kubectl", "kubectl_config")
+      kubectl_config: validate_optional_map!(parsed, "kubectl", "kubectl_config"),
+      query_db_config: validate_optional_map!(parsed, "query_db", "query_db_config")
     }
   end
 

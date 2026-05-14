@@ -27,3 +27,4 @@ function_blocklist:
 
 investigator_profiles: {}
 alert_class_routing: {}
+query_db: {}

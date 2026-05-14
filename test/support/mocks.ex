@@ -14,4 +14,22 @@ Hammox.defmock(Pageless.Tools.Kubectl.Mock,
   for: Pageless.Tools.Kubectl.Behaviour
 )
 
+Hammox.defmock(Pageless.Tools.MCPRunbook.Mock,
+  for: Pageless.Tools.MCPRunbook.Behaviour
+)
+
+case Code.ensure_compiled(Pageless.Tools.PrometheusQuery.Behaviour) do
+  {:module, Pageless.Tools.PrometheusQuery.Behaviour} ->
+    Hammox.defmock(Pageless.Tools.PrometheusQuery.Mock,
+      for: Pageless.Tools.PrometheusQuery.Behaviour
+    )
+
+  {:error, _reason} ->
+    :ok
+end
+
+Hammox.defmock(Pageless.Tools.QueryDB.Mock,
+  for: Pageless.Tools.QueryDB.Behaviour
+)
+
 Hammox.defmock(Pageless.AuditTrailMock, for: Pageless.AuditTrail.Behaviour)

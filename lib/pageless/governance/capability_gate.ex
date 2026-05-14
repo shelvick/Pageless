@@ -413,6 +413,6 @@ defmodule Pageless.Governance.CapabilityGate do
   defp summarize(term) do
     term
     |> inspect()
-    |> String.slice(0, 512)
+    |> String.slice(0, 255)
   end
 end
