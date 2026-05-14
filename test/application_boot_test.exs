@@ -1,0 +1,32 @@
+defmodule Pageless.ApplicationBootTest do
+  @moduledoc "Tests application supervision of fail-closed rules loading."
+
+  use ExUnit.Case, async: true
+
+  alias Pageless.Config.Rules
+  alias Pageless.Config.Rules.Agent, as: RulesAgent
+
+  defp fixture_path(name) do
+    Path.expand("fixtures/pageless_rules/#{name}", __DIR__)
+  end
+
+  test "Application supervisor starts the rules Agent" do
+    [{_, rules_agent, _, _}] =
+      Pageless.Supervisor
+      |> Supervisor.which_children()
+      |> Enum.filter(fn {id, _, _, _} -> id == RulesAgent end)
+
+    assert RulesAgent.get(rules_agent).__struct__ == Rules
+  end
+
+  test "rules child fails closed under supervisor when configured path is malformed" do
+    Process.flag(:trap_exit, true)
+
+    assert {:error,
+            {:shutdown,
+             {:failed_to_start_child, RulesAgent, {:EXIT, {%YamlElixir.ParsingError{}, _stack}}}}} =
+             Supervisor.start_link([{RulesAgent, path: fixture_path("malformed.yaml")}],
+               strategy: :one_for_one
+             )
+  end
+end

@@ -3,7 +3,8 @@ defmodule Pageless.Application do
   OTP application entry point.
 
   Boots the root supervision tree in dependency order: Repo, named PubSub,
-  alert DynamicSupervisor, alert intake subscriber, and the Phoenix endpoint.
+  rules-config Agent, alert DynamicSupervisor, alert intake subscriber, demo
+  conductor, optional MCP filesystem client, and the Phoenix endpoint.
   Production uses structural singleton names here; tests use isolated per-test
   supervisors and PubSub brokers. The endpoint is configured away from port 4000.
   """
@@ -15,6 +16,7 @@ defmodule Pageless.Application do
       [
         Pageless.Repo,
         {Phoenix.PubSub, name: Pageless.PubSub},
+        {Pageless.Config.Rules.Agent, path: rules_path()},
         {Pageless.Sup.AlertTree, name: Pageless.AlertTree},
         %{
           id: Pageless.Sup.AlertIntake,
@@ -50,6 +52,11 @@ defmodule Pageless.Application do
          capabilities: %{},
          protocol_version: Keyword.get(config, :protocol_version, "2024-11-05")}
       ]
+  end
+
+  defp rules_path do
+    Application.get_env(:pageless, :rules_path) ||
+      Path.join(:code.priv_dir(:pageless), "pageless.yaml")
   end
 
   @impl true
