@@ -9,7 +9,8 @@ defmodule Pageless.Config.Rules do
     :kubectl_verbs,
     :function_blocklist,
     investigator_profiles: %{},
-    alert_class_routing: %{}
+    alert_class_routing: %{},
+    kubectl_config: %{}
   ]
 
   @class_names ~w(read write_dev write_prod_low write_prod_high)
@@ -33,7 +34,8 @@ defmodule Pageless.Config.Rules do
           kubectl_verbs: %{classification() => [String.t()]},
           function_blocklist: [String.t()],
           investigator_profiles: map(),
-          alert_class_routing: map()
+          alert_class_routing: map(),
+          kubectl_config: map()
         }
 
   @doc "Loads rules from a YAML file and validates the parsed shape."
@@ -58,7 +60,8 @@ defmodule Pageless.Config.Rules do
       function_blocklist:
         validate_string_list!(Map.fetch!(parsed, "function_blocklist"), "function_blocklist"),
       investigator_profiles: validate_optional_map!(parsed, "investigator_profiles"),
-      alert_class_routing: validate_optional_map!(parsed, "alert_class_routing")
+      alert_class_routing: validate_optional_map!(parsed, "alert_class_routing"),
+      kubectl_config: validate_optional_map!(parsed, "kubectl", "kubectl_config")
     }
   end
 
@@ -117,10 +120,12 @@ defmodule Pageless.Config.Rules do
 
   defp validate_kubectl_verbs!(_verbs), do: raise(ArgumentError, "kubectl_verbs must be a map")
 
-  defp validate_optional_map!(parsed, key) do
+  defp validate_optional_map!(parsed, key), do: validate_optional_map!(parsed, key, key)
+
+  defp validate_optional_map!(parsed, key, label) do
     case Map.get(parsed, key, %{}) do
       value when is_map(value) -> value
-      _value -> raise(ArgumentError, "#{key} must be a map")
+      _value -> raise(ArgumentError, "#{label} must be a map")
     end
   end
 
