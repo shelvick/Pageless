@@ -50,10 +50,21 @@ defmodule Pageless.Tools.PrometheusQueryTest do
   end
 
   describe "behaviour" do
-    test "exposes exec/1 and exec/2 callbacks" do
+    test "exposes exec/1, exec/2, and function_call_definition/0 callbacks" do
       callbacks = Behaviour.behaviour_info(:callbacks)
 
-      assert Enum.sort(callbacks) == [exec: 1, exec: 2]
+      assert Enum.sort(callbacks) == [exec: 1, exec: 2, function_call_definition: 0]
+    end
+  end
+
+  describe "function_call_definition/0" do
+    test "exposes a Gemini function-call declaration for profile-scoped catalogs" do
+      declaration = PrometheusQuery.function_call_definition()
+
+      assert declaration["name"] == "prometheus_query"
+      assert declaration["parameters"]["type"] == "object"
+      assert declaration["parameters"]["required"] == ["promql"]
+      assert declaration["parameters"]["properties"]["promql"]["type"] == "string"
     end
   end
 

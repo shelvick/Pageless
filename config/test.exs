@@ -14,5 +14,7 @@ config :pageless, PagelessWeb.Endpoint,
     "test-key-base-min-64-chars-stable-across-runs-fine-not-a-real-secret-pageless-yo",
   server: false
 
+config :pageless, :kubectl_impl, Pageless.Tools.Kubectl.Mock
+
 config :logger, level: :warning
 config :phoenix, :plug_init_mode, :runtime

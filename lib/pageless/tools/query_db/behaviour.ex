@@ -41,4 +41,7 @@ defmodule Pageless.Tools.QueryDB.Behaviour do
 
   @doc "Executes a query_db tool call with explicit options."
   @callback query(ToolCall.t(), exec_opts()) :: {:ok, ok_result()} | {:error, error_result()}
+
+  @doc "Returns the Gemini function declaration for this tool."
+  @callback function_call_definition() :: map()
 end

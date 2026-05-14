@@ -25,6 +25,69 @@ function_blocklist:
   - dblink_exec
   - dblink
 
-investigator_profiles: {}
+investigator_profiles:
+  logs:
+    label: "Investigator: logs"
+    prompt_template_path: priv/prompts/investigator_logs.eex
+    tool_scope:
+      kubectl: {verbs: [logs]}
+      prometheus_query: false
+      query_db: null
+      mcp_runbook: false
+    output_schema: &finding_schema
+      type: object
+      required: [hypothesis, confidence, evidence]
+      properties:
+        hypothesis: {type: string}
+        confidence: {type: number, minimum: 0, maximum: 1}
+        evidence:
+          type: array
+          items: {type: string}
+    step_limit: 3
+    reasoning_visibility: stream
+  metrics:
+    label: "Investigator: metrics"
+    prompt_template_path: priv/prompts/investigator_metrics.eex
+    tool_scope:
+      kubectl: null
+      prometheus_query: true
+      query_db: null
+      mcp_runbook: false
+    output_schema: *finding_schema
+    step_limit: 3
+    reasoning_visibility: stream
+  deploys:
+    label: "Investigator: deploys"
+    prompt_template_path: priv/prompts/investigator_deploys.eex
+    tool_scope:
+      kubectl: {verbs: [get, describe]}
+      prometheus_query: false
+      query_db: {tables: [deploys]}
+      mcp_runbook: false
+    output_schema: *finding_schema
+    step_limit: 3
+    reasoning_visibility: stream
+  pool_state:
+    label: "Investigator: pool_state"
+    prompt_template_path: priv/prompts/investigator_pool_state.eex
+    tool_scope:
+      kubectl: null
+      prometheus_query: false
+      query_db: {tables: [pg_stat_activity, pg_stat_locks]}
+      mcp_runbook: true
+    output_schema: *finding_schema
+    step_limit: 3
+    reasoning_visibility: stream
+  generic:
+    label: "Investigator: generic"
+    prompt_template_path: priv/prompts/investigator_generic.eex
+    tool_scope:
+      kubectl: {verbs: [get, logs, describe]}
+      prometheus_query: true
+      query_db: {tables: [deploys, pg_stat_activity, pg_stat_locks]}
+      mcp_runbook: true
+    output_schema: *finding_schema
+    step_limit: 2
+    reasoning_visibility: stream
 alert_class_routing: {}
 query_db: {}

@@ -22,6 +22,18 @@ defmodule Pageless.Tools.KubectlTest do
     %{pubsub: pubsub, rules: default_rules(), shim: shim_path()}
   end
 
+  describe "function_call_definition/0" do
+    test "exposes a Gemini function-call declaration for profile-scoped catalogs" do
+      declaration = Kubectl.function_call_definition()
+
+      assert declaration["name"] == "kubectl"
+      assert declaration["parameters"]["type"] == "object"
+      assert declaration["parameters"]["required"] == ["args"]
+      assert declaration["parameters"]["properties"]["args"]["type"] == "array"
+      assert declaration["parameters"]["properties"]["args"]["items"] == %{"type" => "string"}
+    end
+  end
+
   describe "exec/2" do
     test "runs read-class kubectl args and captures stdout", %{shim: shim} do
       call = tool_call(["--print-stdout", "NAME READY STATUS\npayments-api-abc 1/1 Running"])

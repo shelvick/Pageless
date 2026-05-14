@@ -35,4 +35,7 @@ defmodule Pageless.Tools.MCPRunbook.Behaviour do
 
   @doc "Executes an MCP runbook tool call with explicit options."
   @callback exec(ToolCall.t(), exec_opts()) :: {:ok, ok_result()} | {:error, error_result()}
+
+  @doc "Returns the Gemini function declaration for this tool."
+  @callback function_call_definition() :: map()
 end

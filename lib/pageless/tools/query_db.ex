@@ -31,6 +31,21 @@ defmodule Pageless.Tools.QueryDB do
     end
   end
 
+  @doc "Returns the Gemini function declaration for read-only SQL queries."
+  @impl true
+  @spec function_call_definition() :: map()
+  def function_call_definition do
+    %{
+      "name" => "query_db",
+      "description" => "Run a capability-gated, SELECT-only SQL query.",
+      "parameters" => %{
+        "type" => "object",
+        "required" => ["sql"],
+        "properties" => %{"sql" => %{"type" => "string"}}
+      }
+    }
+  end
+
   defp validate_args(sql) when is_binary(sql) do
     case String.trim(sql) do
       "" -> {:error, :invalid_args}

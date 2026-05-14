@@ -8,6 +8,7 @@ defmodule PagelessWeb.OperatorDashboardLive do
 
   alias Pageless.AlertEnvelope
   alias Pageless.AuditTrail
+  alias PagelessWeb.Components.AgentTreeView
   alias PagelessWeb.Components.ApprovalModal
 
   @page_title "Pageless — Operator Dashboard"
@@ -38,7 +39,8 @@ defmodule PagelessWeb.OperatorDashboardLive do
         stats: nil,
         current_beat: nil,
         gate_envelope: nil,
-        alert_topic: nil
+        alert_topic: nil,
+        tree_event: nil
       )
 
     {:ok, socket}
@@ -96,7 +98,42 @@ defmodule PagelessWeb.OperatorDashboardLive do
     assign(socket, :current_beat, beat)
   end
 
+  defp apply_dashboard_event(socket, message) when is_tuple(message) do
+    if agent_event?(message) do
+      assign(socket, :tree_event, message)
+    else
+      socket
+    end
+  end
+
   defp apply_dashboard_event(socket, _message), do: socket
+
+  @spec agent_event?(tuple()) :: boolean()
+  defp agent_event?(message) do
+    message
+    |> elem(0)
+    |> agent_event_name?()
+  end
+
+  @spec agent_event_name?(atom()) :: boolean()
+  defp agent_event_name?(name)
+       when name in [
+              :reasoning_line,
+              :tool_call,
+              :tool_error,
+              :tool_hallucination,
+              :investigation_complete,
+              :investigation_failed,
+              :page_out_sent,
+              :page_out_failed
+            ],
+       do: true
+
+  defp agent_event_name?(name) do
+    name
+    |> Atom.to_string()
+    |> String.starts_with?(["triager_", "investigator_", "remediator_", "escalator_"])
+  end
 
   @spec normalize_tool_dispatch(term()) :: (term() -> {:ok, term()} | {:error, term()})
   defp normalize_tool_dispatch({module, function, extra_args})
@@ -133,12 +170,13 @@ defmodule PagelessWeb.OperatorDashboardLive do
         <div class="grid gap-5 lg:grid-cols-[1fr_1.2fr_0.9fr]">
           <.alert_intake_card envelope={@envelope} />
 
-          <section class="rounded-2xl border border-slate-700 bg-slate-950/70 p-6 shadow-2xl">
-            <div class="text-xs font-bold uppercase tracking-[0.28em] text-slate-500">Agent tree</div>
-            <div class="mt-8 rounded-2xl border border-dashed border-slate-700 bg-slate-900/50 p-10 text-center text-slate-400">
-              Agent tree — landing in a later Change Set
-            </div>
-          </section>
+          <.live_component
+            module={AgentTreeView}
+            id="agent-tree"
+            alert_id={@envelope && @envelope.alert_id}
+            pubsub={@pubsub_broker}
+            event={@tree_event}
+          />
 
           <.scoreboard_card stats={@stats} />
         </div>

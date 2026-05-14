@@ -61,6 +61,18 @@ defmodule PagelessWeb.OperatorDashboardLiveTest do
       assert :ok = DemoConductor.broadcast_beat(conductor, :b8)
 
       assert render(view) =~ "Pageless — Operator Dashboard"
+
+      Phoenix.PubSub.broadcast(
+        broker,
+        "alert:#{envelope.alert_id}",
+        {:triager_spawned, "triager-1", envelope.alert_id}
+      )
+
+      tree_html = render(view)
+      assert tree_html =~ "triager-1"
+      assert tree_html =~ "Triager"
+      refute tree_html =~ "N/A"
+      refute tree_html =~ "error"
     end
 
     @tag :acceptance

@@ -1,0 +1,1 @@
+Investigate <%= @service %> as logs investigator. Focus on recent pod logs, restarts, and error signatures for alert <%= @alert_id %>.

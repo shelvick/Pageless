@@ -1,0 +1,1 @@
+Investigate <%= @service %> as pool-state investigator. Inspect database pool and lock evidence, then use runbooks when needed for alert <%= @alert_id %>.

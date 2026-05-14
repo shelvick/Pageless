@@ -22,6 +22,17 @@ defmodule Pageless.Tools.QueryDBTest do
     %{pubsub: pubsub, rules: default_rules()}
   end
 
+  describe "function_call_definition/0" do
+    test "exposes a Gemini function-call declaration for profile-scoped catalogs" do
+      declaration = QueryDB.function_call_definition()
+
+      assert declaration["name"] == "query_db"
+      assert declaration["parameters"]["type"] == "object"
+      assert declaration["parameters"]["required"] == ["sql"]
+      assert declaration["parameters"]["properties"]["sql"]["type"] == "string"
+    end
+  end
+
   describe "query/2" do
     test "returns the B4 deploy row from the literal demo SQL" do
       DeployLedger.seed_demo!(Repo, date: ~D[2026-05-13])

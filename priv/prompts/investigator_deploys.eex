@@ -1,0 +1,1 @@
+Investigate <%= @service %> as deploys investigator. Correlate recent deploys with Kubernetes state and report whether a release likely caused alert <%= @alert_id %>.

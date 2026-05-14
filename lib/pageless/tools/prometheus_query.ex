@@ -27,6 +27,21 @@ defmodule Pageless.Tools.PrometheusQuery do
     end
   end
 
+  @doc "Returns the Gemini function declaration for Prometheus instant queries."
+  @impl true
+  @spec function_call_definition() :: map()
+  def function_call_definition do
+    %{
+      "name" => "prometheus_query",
+      "description" => "Run a read-only PromQL instant query through the capability gate.",
+      "parameters" => %{
+        "type" => "object",
+        "required" => ["promql"],
+        "properties" => %{"promql" => %{"type" => "string"}}
+      }
+    }
+  end
+
   @spec validate_promql(term()) :: {:ok, String.t()} | :error
   defp validate_promql(promql) when is_binary(promql) do
     if String.trim(promql) == "", do: :error, else: {:ok, promql}
