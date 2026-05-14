@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payments-api-v2-4-1
+  namespace: prod
+  labels:
+    app: payments-api
+    version: v2.4.1
+spec:
+  replicas: 4
+  selector:
+    matchLabels:
+      app: payments-api
+      version: v2.4.1
+  template:
+    metadata:
+      labels:
+        app: payments-api
+        version: v2.4.1
+    spec:
+      containers:
+        - name: app
+          image: nginx:1.27
+          ports:
+            - containerPort: 80
+          volumeMounts:
+            - name: nginx-conf
+              mountPath: /etc/nginx/conf.d
+      volumes:
+        - name: nginx-conf
+          configMap:
+            name: payments-api-v241-nginx
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: payments-api-v241-nginx
+  namespace: prod
+data:
+  default.conf: |
+    server {
+      listen 80;
+      location = /health { return 500 "ConnectionRefused: upstream payments-db"; }
+      location / { return 500 "payments-api v2.4.1 — broken deploy"; }
+    }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: payments-api-v2-4-1
+  namespace: prod
+  labels:
+    app: payments-api
+    version: v2.4.1
+spec:
+  selector:
+    app: payments-api
+    version: v2.4.1
+  ports:
+    - port: 80
+      targetPort: 80
+      name: http

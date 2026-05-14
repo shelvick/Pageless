@@ -10,4 +10,8 @@ Hammox.defmock(Pageless.Svc.ResolveClient.Mock,
   for: Pageless.Svc.ResolveClient.Behaviour
 )
 
+Hammox.defmock(Pageless.Tools.Kubectl.Mock,
+  for: Pageless.Tools.Kubectl.Behaviour
+)
+
 Hammox.defmock(Pageless.AuditTrailMock, for: Pageless.AuditTrail.Behaviour)

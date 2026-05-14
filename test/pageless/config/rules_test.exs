@@ -208,12 +208,28 @@ defmodule Pageless.Config.RulesTest do
       end
     end
 
-    test "defaults absent routing and profile sections to empty maps" do
+    test "defaults absent routing, profile, and kubectl sections to empty maps" do
       rules = Rules.validate!(valid_rules_map())
 
       assert rules.__struct__ == Rules
       assert rules.investigator_profiles == %{}
       assert rules.alert_class_routing == %{}
+      assert rules.kubectl_config == %{}
+    end
+
+    test "preserves present kubectl config map with string keys" do
+      kubectl_config = %{"binary" => "/usr/local/bin/kubectl", "default_timeout_ms" => 60_000}
+
+      rules = Rules.validate!(valid_rules_map(%{"kubectl" => kubectl_config}))
+
+      assert rules.kubectl_config == kubectl_config
+    end
+
+    test "raises when kubectl config is not a map" do
+      assert_raise ArgumentError, ~r/kubectl_config must be a map/, fn ->
+        valid_rules_map(%{"kubectl" => "not a map"})
+        |> Rules.validate!()
+      end
     end
 
     test "preserves present routing and profile maps" do

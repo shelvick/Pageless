@@ -51,7 +51,8 @@ defmodule Pageless.Sup.Alert do
         sandbox_owner: state.sandbox_owner,
         audit_repo: state.audit_repo,
         gemini_client: state.gemini_client,
-        parent: state.parent || self()
+        parent: state.parent || self(),
+        alert_sup: alert_sup
       ]
       |> Keyword.merge(agent_extra_opts)
 
