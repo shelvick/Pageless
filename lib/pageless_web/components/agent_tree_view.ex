@@ -3,13 +3,14 @@ defmodule PagelessWeb.Components.AgentTreeView do
   Per-alert agent topology projection for the operator dashboard.
 
   The component receives agent PubSub events forwarded by the parent LiveView,
-  mutates an in-memory topology map, and renders each node through
-  `PagelessWeb.Components.AgentNode`. It uses an inline SVG/HTML fallback path
-  rather than LiveFlow so the demo tree stays dependency-light and predictable.
+  mutates an in-memory topology map, projects that topology into
+  `LiveFlow.Components.Flow`, and renders each node through
+  `PagelessWeb.Components.AgentNode`.
   """
 
   use Phoenix.LiveComponent
 
+  alias LiveFlow.{Edge, Node, State}
   alias PagelessWeb.Components.AgentNode
 
   @type topology :: %{nodes: map(), edges: [edge()]}
@@ -207,10 +208,15 @@ defmodule PagelessWeb.Components.AgentTreeView do
     |> to_tuple()
   end
 
-  @doc "Renders the SVG-fallback tree and node cards."
+  @doc "Renders the LiveFlow tree and node cards."
   @spec render(map()) :: Phoenix.LiveView.Rendered.t()
   def render(assigns) do
-    assigns = assign(assigns, :laid_out_nodes, laid_out_nodes(assigns.node_data))
+    laid_out_nodes = laid_out_nodes(assigns.node_data)
+
+    assigns =
+      assigns
+      |> assign(:flow, flow_from_topology(assigns.topology, laid_out_nodes))
+      |> assign(:flow_id, "#{assigns.id}-flow")
 
     ~H"""
     <section class="rounded-2xl border border-slate-700 bg-slate-950/70 p-6 shadow-2xl">
@@ -235,37 +241,27 @@ defmodule PagelessWeb.Components.AgentTreeView do
 
       <div
         :if={@alert_id && map_size(@node_data) > 0}
-        class="relative mt-6 min-h-[28rem] overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/40 p-4"
+        class="mt-6 h-[34rem] overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/40"
       >
-        <svg
-          class="pointer-events-none absolute inset-0 h-full w-full"
-          viewBox="0 0 1000 520"
-          preserveAspectRatio="none"
-          aria-hidden="true"
-        >
-          <line
-            :for={edge <- @topology.edges}
-            x1={edge_x(@laid_out_nodes, edge.source)}
-            y1={edge_y(@laid_out_nodes, edge.source)}
-            x2={edge_x(@laid_out_nodes, edge.target)}
-            y2={edge_y(@laid_out_nodes, edge.target)}
-            class="stroke-cyan-500/50"
-            stroke-width="2"
-          />
-        </svg>
-
-        <div class="relative grid gap-5 lg:grid-cols-3">
-          <div :for={level <- grouped_levels(@laid_out_nodes)} class="space-y-5">
-            <.live_component
-              :for={node <- level}
-              module={AgentNode}
-              id={node.id}
-              role={node.data.role}
-              data={node.data}
-              beat={nil}
-            />
-          </div>
-        </div>
+        <.live_component
+          module={LiveFlow.Components.Flow}
+          id={@flow_id}
+          flow={@flow}
+          node_types={%{agent: AgentNode}}
+          opts={
+            %{
+              background: :dots,
+              controls: false,
+              fit_view_on_init: true,
+              default_edge_type: :smoothstep,
+              nodes_draggable: false,
+              nodes_connectable: false,
+              elements_selectable: false,
+              pan_on_drag: true,
+              zoom_on_scroll: true
+            }
+          }
+        />
       </div>
     </section>
     """
@@ -388,6 +384,8 @@ defmodule PagelessWeb.Components.AgentTreeView do
     node_data
     |> Enum.map(fn {id, data} -> %{id: id, data: data, level: level_for_role(data.role)} end)
     |> Enum.sort_by(fn node -> {node.level, node.id} end)
+    |> Enum.with_index()
+    |> Enum.map(fn {node, index} -> Map.put(node, :index, index) end)
   end
 
   @spec level_for_role(atom()) :: non_neg_integer()
@@ -397,28 +395,39 @@ defmodule PagelessWeb.Components.AgentTreeView do
   defp level_for_role(:escalator), do: 2
   defp level_for_role(_role), do: 2
 
-  @spec grouped_levels([map()]) :: [[map()]]
-  defp grouped_levels(nodes) do
-    nodes
-    |> Enum.group_by(& &1.level)
-    |> Enum.sort_by(fn {level, _nodes} -> level end)
-    |> Enum.map(fn {_level, nodes} -> nodes end)
+  @spec flow_from_topology(topology(), [map()]) :: State.t()
+  defp flow_from_topology(topology, laid_out_nodes) do
+    State.new(
+      nodes: Enum.map(laid_out_nodes, &flow_node/1),
+      edges: Enum.map(topology.edges, &flow_edge/1)
+    )
   end
 
-  @spec edge_x([map()], String.t()) :: integer()
-  defp edge_x(nodes, id), do: coordinate(nodes, id, 120, 360, :level)
+  @spec flow_node(map()) :: Node.t()
+  defp flow_node(node) do
+    Node.new(node.id, flow_position(node), node.data,
+      type: :agent,
+      draggable: false,
+      connectable: false,
+      selectable: false,
+      deletable: false,
+      class: "agent-node-entry"
+    )
+  end
 
-  @spec edge_y([map()], String.t()) :: integer()
-  defp edge_y(nodes, id), do: coordinate(nodes, id, 80, 115, :index)
+  @spec flow_position(map()) :: %{x: integer(), y: integer()}
+  defp flow_position(%{level: level, index: index}) do
+    %{x: 40 + level * 340, y: 70 + index * 130}
+  end
 
-  @spec coordinate([map()], String.t(), integer(), integer(), :level | :index) :: integer()
-  defp coordinate(nodes, id, base, step, axis) do
-    nodes
-    |> Enum.with_index()
-    |> Enum.find_value(base, fn {node, index} ->
-      if node.id == id do
-        if axis == :level, do: base + node.level * step, else: base + index * step
-      end
-    end)
+  @spec flow_edge(edge()) :: Edge.t()
+  defp flow_edge(%{source: source, target: target}) do
+    Edge.new("#{source}->#{target}", source, target,
+      type: :smoothstep,
+      animated: true,
+      selectable: false,
+      deletable: false,
+      style: %{"stroke" => "rgba(6, 182, 212, 0.65)", "stroke-width" => "2"}
+    )
   end
 end

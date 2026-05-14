@@ -6,12 +6,14 @@
 import "phoenix_html";
 import { Socket } from "phoenix";
 import { LiveSocket } from "phoenix_live_view";
+import { LiveFlowHook } from "live_flow";
 
 const csrfToken = document
   .querySelector("meta[name='csrf-token']")
   .getAttribute("content");
 
 const liveSocket = new LiveSocket("/live", Socket, {
+  hooks: { LiveFlow: LiveFlowHook },
   longPollFallbackMs: 2500,
   params: { _csrf_token: csrfToken },
 });
