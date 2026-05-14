@@ -1,0 +1,1 @@
+Investigate <%= @service %> as metrics investigator. Use Prometheus evidence to explain saturation, 5xx spikes, latency, and availability for alert <%= @alert_id %>.

@@ -1,0 +1,1 @@
+Investigate <%= @service %> as general fallback investigator. Use any available read tools to produce a concise hypothesis, confidence, and evidence for alert <%= @alert_id %>.

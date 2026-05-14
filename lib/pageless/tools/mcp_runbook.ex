@@ -36,6 +36,24 @@ defmodule Pageless.Tools.MCPRunbook do
     end
   end
 
+  @doc "Returns the Gemini function declaration for MCP runbook calls."
+  @impl true
+  @spec function_call_definition() :: map()
+  def function_call_definition do
+    %{
+      "name" => "mcp_runbook",
+      "description" => "Read runbook material through a configured MCP tool.",
+      "parameters" => %{
+        "type" => "object",
+        "required" => ["tool_name", "params"],
+        "properties" => %{
+          "tool_name" => %{"type" => "string"},
+          "params" => %{"type" => "object"}
+        }
+      }
+    }
+  end
+
   defp validate_args(%{"tool_name" => name, "params" => params})
        when is_binary(name) and is_map(params) do
     {:ok, name, params}

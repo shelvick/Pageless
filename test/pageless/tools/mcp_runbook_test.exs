@@ -23,6 +23,18 @@ defmodule Pageless.Tools.MCPRunbookTest do
     %{pubsub: pubsub, rules: default_rules()}
   end
 
+  describe "function_call_definition/0" do
+    test "exposes a Gemini function-call declaration for profile-scoped catalogs" do
+      declaration = MCPRunbook.function_call_definition()
+
+      assert declaration["name"] == "mcp_runbook"
+      assert declaration["parameters"]["type"] == "object"
+      assert declaration["parameters"]["required"] == ["tool_name", "params"]
+      assert declaration["parameters"]["properties"]["tool_name"]["type"] == "string"
+      assert declaration["parameters"]["properties"]["params"]["type"] == "object"
+    end
+  end
+
   describe "exec/2" do
     test "reads the B4 runbook path through the injected MCP client" do
       path = "runbooks/payments-api/connection-errors.md"

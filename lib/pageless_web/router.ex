@@ -22,6 +22,10 @@ defmodule PagelessWeb.Router do
     plug(PagelessWeb.Plugs.InjectPubSub)
   end
 
+  pipeline :demo do
+    plug(:accepts, ["json"])
+  end
+
   scope "/", PagelessWeb do
     pipe_through(:browser)
 
@@ -35,5 +39,11 @@ defmodule PagelessWeb.Router do
 
     post("/alertmanager", AlertmanagerWebhookController, :create)
     post("/pagerduty-events-v2", PagerDutyWebhookController, :create)
+  end
+
+  scope "/demo", PagelessWeb do
+    pipe_through(:demo)
+
+    post("/fire-test-alert", FireTestAlertController, :create)
   end
 end

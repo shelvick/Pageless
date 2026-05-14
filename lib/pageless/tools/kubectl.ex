@@ -29,6 +29,23 @@ defmodule Pageless.Tools.Kubectl do
     end
   end
 
+  @doc "Returns the Gemini function declaration for kubectl calls."
+  @impl true
+  @spec function_call_definition() :: map()
+  def function_call_definition do
+    %{
+      "name" => "kubectl",
+      "description" => "Run a capability-gated kubectl command with argv-style arguments.",
+      "parameters" => %{
+        "type" => "object",
+        "required" => ["args"],
+        "properties" => %{
+          "args" => %{"type" => "array", "items" => %{"type" => "string"}}
+        }
+      }
+    }
+  end
+
   defp validate_args(args) when is_list(args) and args != [] do
     if Enum.all?(args, &is_binary/1), do: :ok, else: {:error, :invalid_args}
   end
