@@ -75,6 +75,39 @@ defmodule PagelessWeb.OperatorDashboardLiveTest do
       refute tree_html =~ "error"
     end
 
+    test "absorbs LiveFlow hook callbacks without crashing the dashboard", %{conn: conn} do
+      broker = PubSubHelpers.start_isolated_pubsub()
+      envelope = demo_envelope()
+
+      {:ok, view, _html} =
+        live_isolated(conn, OperatorDashboardLive, session: %{"pubsub_broker" => broker})
+
+      Phoenix.PubSub.broadcast(broker, "alerts", {:alert_received, envelope})
+      assert render(view) =~ "payments-api health check failing"
+
+      Phoenix.PubSub.broadcast(
+        broker,
+        "alert:#{envelope.alert_id}",
+        {:triager_spawned, "triager-1", envelope.alert_id}
+      )
+
+      assert render(view) =~ "triager-1"
+
+      render_hook(view, "lf:node_change", %{
+        "changes" => [
+          %{"id" => "triager-1", "type" => "dimensions", "height" => 114, "width" => 163}
+        ]
+      })
+
+      render_hook(view, "lf:viewport_change", %{"x" => 0, "y" => 0, "zoom" => 1.0})
+      render_hook(view, "lf:edge_change", %{"changes" => []})
+
+      assert Process.alive?(view.pid)
+      survived_html = render(view)
+      assert survived_html =~ "triager-1"
+      assert survived_html =~ "Triager"
+    end
+
     @tag :acceptance
     test "approving a gated rollout undo dispatches once and collapses the modal", %{conn: conn} do
       broker = PubSubHelpers.start_isolated_pubsub()

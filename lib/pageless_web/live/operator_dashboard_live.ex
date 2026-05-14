@@ -53,6 +53,17 @@ defmodule PagelessWeb.OperatorDashboardLive do
     {:noreply, apply_dashboard_event(socket, message)}
   end
 
+  @doc """
+  Absorbs LiveFlow JS hook callbacks bubbled up from the nested flow.
+
+  `LiveFlow.Components.Flow`'s client hook uses `pushEvent` (not `pushEventTo`),
+  so events like `lf:node_change` reach this LiveView even though the tree is
+  read-only here. Any `lf:` event is dropped to keep the LiveView alive.
+  """
+  @spec handle_event(String.t(), map(), Phoenix.LiveView.Socket.t()) ::
+          {:noreply, Phoenix.LiveView.Socket.t()}
+  def handle_event("lf:" <> _rest, _params, socket), do: {:noreply, socket}
+
   @spec apply_dashboard_event(Phoenix.LiveView.Socket.t(), term()) :: Phoenix.LiveView.Socket.t()
   defp apply_dashboard_event(socket, {:alert_received, %AlertEnvelope{} = envelope}) do
     topic = "alert:#{envelope.alert_id}"

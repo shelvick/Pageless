@@ -19,6 +19,18 @@ defmodule PagelessWeb.Components.AgentNode do
 
   @doc "Stores the latest node rendering assigns."
   @spec update(map(), Phoenix.LiveView.Socket.t()) :: {:ok, Phoenix.LiveView.Socket.t()}
+  def update(%{node: node} = assigns, socket) do
+    assigns =
+      assigns
+      |> Map.delete(:node)
+      |> Map.put(:id, node.id)
+      |> Map.put(:role, node.data.role)
+      |> Map.put(:data, node.data)
+      |> Map.put_new(:beat, nil)
+
+    update(assigns, socket)
+  end
+
   def update(assigns, socket) do
     previous_banner = socket.assigns[:data] && Map.get(socket.assigns.data, :banner)
     incoming_banner = assigns[:data] && Map.get(assigns.data, :banner)
