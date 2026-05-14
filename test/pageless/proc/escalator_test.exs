@@ -120,6 +120,7 @@ defmodule Pageless.Proc.EscalatorTest do
           resolve_client: Pageless.Proc.EscalatorTest.SuccessResolveClient
         )
 
+      :ok = Escalator.kick_off(pid)
       monitor_ref = Process.monitor(pid)
 
       assert_receive {:escalator_reasoning, ^agent_id, "Paging on-call"}
@@ -155,6 +156,7 @@ defmodule Pageless.Proc.EscalatorTest do
           resolve_client: Pageless.Proc.EscalatorTest.NoopResolveClient
         )
 
+      :ok = Escalator.kick_off(pid)
       monitor_ref = Process.monitor(pid)
 
       assert_receive {:page_out_sent, ^agent_id, "alert-escalator", _page_payload}
@@ -181,6 +183,7 @@ defmodule Pageless.Proc.EscalatorTest do
           resolve_client: Pageless.Proc.EscalatorTest.FailureResolveClient
         )
 
+      :ok = Escalator.kick_off(pid)
       monitor_ref = Process.monitor(pid)
 
       assert_receive {:page_out_failed, ^agent_id, "alert-escalator", :rate_limited}
@@ -211,6 +214,7 @@ defmodule Pageless.Proc.EscalatorTest do
           resolve_client: Pageless.Proc.EscalatorTest.ForbiddenResolveClient
         )
 
+      :ok = Escalator.kick_off(pid)
       monitor_ref = Process.monitor(pid)
 
       assert_receive {:page_out_failed, ^agent_id, "alert-escalator", :gemini_timeout}
@@ -238,6 +242,7 @@ defmodule Pageless.Proc.EscalatorTest do
           resolve_client: Pageless.Proc.EscalatorTest.AssertingResolveClient
         )
 
+      :ok = Escalator.kick_off(pid)
       monitor_ref = Process.monitor(pid)
       assert_receive {:DOWN, ^monitor_ref, :process, ^pid, reason}
       assert clean_exit?(reason)

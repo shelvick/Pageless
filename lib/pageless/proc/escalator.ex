@@ -55,6 +55,18 @@ defmodule Pageless.Proc.Escalator do
   @spec start_link(opts()) :: GenServer.on_start()
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
 
+  @doc """
+  Triggers the page-out run.
+
+  Setup work (`allow_sandbox`, audit `:spawned` row, `:escalator_spawned`
+  broadcast) completes during `handle_continue/2` before this returns.
+  Callers must invoke `kick_off/1` after spawn — most importantly so
+  test-double allowances on `gemini_client` / `resolve_client` are
+  installed before `handle_info(:run, state)` reaches them.
+  """
+  @spec kick_off(GenServer.server()) :: :ok
+  def kick_off(server), do: send(server, :run) |> then(fn _ -> :ok end)
+
   @impl true
   def init(opts) do
     state = %__MODULE__{
@@ -82,7 +94,6 @@ defmodule Pageless.Proc.Escalator do
       |> append(:spawned, %{envelope_summary: envelope_summary(state.envelope)})
       |> broadcast({:escalator_spawned, state.agent_id, state.alert_id})
 
-    send(self(), :run)
     {:noreply, state}
   end
 

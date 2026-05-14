@@ -7,6 +7,8 @@ defmodule PagelessWeb.OperatorDashboardLive do
   import PagelessWeb.Components.ScoreboardCard
 
   alias Pageless.AlertEnvelope
+  alias Pageless.AuditTrail
+  alias PagelessWeb.Components.ApprovalModal
 
   @page_title "Pageless — Operator Dashboard"
 
@@ -29,9 +31,14 @@ defmodule PagelessWeb.OperatorDashboardLive do
       assign(socket,
         page_title: @page_title,
         pubsub_broker: broker,
+        repo: Map.get(session, "repo", AuditTrail),
+        tool_dispatch: normalize_tool_dispatch(Map.get(session, "tool_dispatch")),
+        operator_ref: Map.get(session, "operator_ref", "operator:demo"),
         envelope: nil,
         stats: nil,
-        current_beat: nil
+        current_beat: nil,
+        gate_envelope: nil,
+        alert_topic: nil
       )
 
     {:ok, socket}
@@ -46,7 +53,37 @@ defmodule PagelessWeb.OperatorDashboardLive do
 
   @spec apply_dashboard_event(Phoenix.LiveView.Socket.t(), term()) :: Phoenix.LiveView.Socket.t()
   defp apply_dashboard_event(socket, {:alert_received, %AlertEnvelope{} = envelope}) do
-    assign(socket, :envelope, envelope)
+    topic = "alert:#{envelope.alert_id}"
+
+    if connected?(socket) and socket.assigns.alert_topic != topic do
+      :ok = Phoenix.PubSub.subscribe(socket.assigns.pubsub_broker, topic)
+    end
+
+    assign(socket, envelope: envelope, alert_topic: topic)
+  end
+
+  defp apply_dashboard_event(
+         socket,
+         {:gate_fired, gate_id, tool_call, classification, verb, reasoning_context}
+       ) do
+    assign(socket,
+      gate_envelope: %{
+        gate_id: gate_id,
+        tool_call: tool_call,
+        classification: classification,
+        verb: verb,
+        reasoning_context: reasoning_context || %{}
+      }
+    )
+  end
+
+  defp apply_dashboard_event(socket, {:gate_result, _gate_id, _result}) do
+    assign(socket, :gate_envelope, nil)
+  end
+
+  defp apply_dashboard_event(socket, message)
+       when is_tuple(message) and tuple_size(message) >= 3 and elem(message, 0) == :gate_decision do
+    assign(socket, :gate_envelope, nil)
   end
 
   defp apply_dashboard_event(socket, {:conductor_beat, :b7, :conductor, stats})
@@ -61,6 +98,17 @@ defmodule PagelessWeb.OperatorDashboardLive do
 
   defp apply_dashboard_event(socket, _message), do: socket
 
+  @spec normalize_tool_dispatch(term()) :: (term() -> {:ok, term()} | {:error, term()})
+  defp normalize_tool_dispatch({module, function, extra_args})
+       when is_atom(module) and is_atom(function) and is_list(extra_args) do
+    fn tool_call -> apply(module, function, extra_args ++ [tool_call]) end
+  end
+
+  defp normalize_tool_dispatch(dispatch) when is_function(dispatch, 1), do: dispatch
+
+  defp normalize_tool_dispatch(_dispatch),
+    do: fn _tool_call -> {:error, :tool_not_implemented} end
+
   @doc "Renders the dashboard shell."
   @spec render(map()) :: Phoenix.LiveView.Rendered.t()
   def render(assigns) do
@@ -71,6 +119,16 @@ defmodule PagelessWeb.OperatorDashboardLive do
           <p class="text-xs font-black uppercase tracking-[0.35em] text-cyan-300">Pageless</p>
           <h1 class="text-4xl font-black tracking-tight sm:text-6xl">{@page_title}</h1>
         </header>
+
+        <.live_component
+          module={ApprovalModal}
+          id="approval-modal"
+          gate_envelope={@gate_envelope}
+          pubsub={@pubsub_broker}
+          repo={@repo}
+          tool_dispatch={@tool_dispatch}
+          operator_ref={@operator_ref}
+        />
 
         <div class="grid gap-5 lg:grid-cols-[1fr_1.2fr_0.9fr]">
           <.alert_intake_card envelope={@envelope} />

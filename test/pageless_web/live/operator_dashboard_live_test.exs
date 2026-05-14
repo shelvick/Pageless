@@ -6,7 +6,9 @@ defmodule PagelessWeb.OperatorDashboardLiveTest do
   import Phoenix.LiveViewTest
 
   alias Pageless.AlertEnvelope
+  alias Pageless.AuditTrail.Decision
   alias Pageless.Conductor.DemoConductor
+  alias Pageless.Governance.ToolCall
   alias Pageless.PubSubHelpers
   alias PagelessWeb.OperatorDashboardLive
 
@@ -60,6 +62,62 @@ defmodule PagelessWeb.OperatorDashboardLiveTest do
 
       assert render(view) =~ "Pageless — Operator Dashboard"
     end
+
+    @tag :acceptance
+    test "approving a gated rollout undo dispatches once and collapses the modal", %{conn: conn} do
+      broker = PubSubHelpers.start_isolated_pubsub()
+
+      envelope = demo_envelope()
+      gate_id = unique("gate")
+      tool_call = rollout_undo_call(envelope.alert_id)
+      reasoning_context = %{summary: "rollback bad deploy", evidence_link: "runbook://payments"}
+      tool_dispatch = {__MODULE__, :dispatch_tool, [self()]}
+      repo = repo_double(gate_id, tool_call)
+
+      {:ok, view, _html} =
+        live_isolated(conn, OperatorDashboardLive,
+          session: %{
+            "pubsub_broker" => broker,
+            "repo" => repo,
+            "tool_dispatch" => tool_dispatch,
+            "operator_ref" => "operator:demo"
+          }
+        )
+
+      Phoenix.PubSub.broadcast(broker, "alerts", {:alert_received, envelope})
+      assert render(view) =~ "payments-api health check failing"
+
+      Phoenix.PubSub.broadcast(
+        broker,
+        "alert:#{envelope.alert_id}",
+        {:gate_fired, gate_id, tool_call, :write_prod_high, "rollout undo", reasoning_context}
+      )
+
+      modal_html = render(view)
+      assert modal_html =~ "rollout undo"
+      assert modal_html =~ "deployment/payments-api"
+      assert modal_html =~ "rollback bad deploy"
+      assert modal_html =~ "Approve"
+      assert modal_html =~ "Deny"
+      refute modal_html =~ "N/A"
+      refute modal_html =~ "error"
+
+      view |> element("button", "Approve") |> render_click()
+
+      assert_receive {:tool_dispatched, ^tool_call}, 500
+      refute_received {:tool_dispatched, _other_call}
+
+      Phoenix.PubSub.broadcast(
+        broker,
+        "alert:#{envelope.alert_id}",
+        {:gate_decision, :executed, gate_id, tool_call, "rolled back"}
+      )
+
+      collapsed_html = render(view)
+      refute collapsed_html =~ "rollout undo"
+      refute collapsed_html =~ "deployment/payments-api"
+      assert collapsed_html =~ "Pageless — Operator Dashboard"
+    end
   end
 
   defp demo_envelope do
@@ -93,4 +151,70 @@ defmodule PagelessWeb.OperatorDashboardLiveTest do
       terminal_commands: 0
     }
   end
+
+  def dispatch_tool(test_pid, %ToolCall{} = dispatched_call) when is_pid(test_pid) do
+    send(test_pid, {:tool_dispatched, dispatched_call})
+    {:ok, "rolled back"}
+  end
+
+  defp rollout_undo_call(alert_id) do
+    %ToolCall{
+      tool: :kubectl,
+      args: ["rollout", "undo", "deployment/payments-api", "-n", "prod"],
+      agent_id: Ecto.UUID.generate(),
+      agent_pid_inspect: inspect(self()),
+      alert_id: alert_id,
+      request_id: unique("req"),
+      reasoning_context: %{summary: "rollback bad deploy", evidence_link: "runbook://payments"}
+    }
+  end
+
+  defp repo_double(gate_id, %ToolCall{} = tool_call) do
+    module = Module.concat(__MODULE__, "RepoDouble#{System.unique_integer([:positive])}")
+    gated = Macro.escape(gated_decision(gate_id, tool_call))
+    approved = Macro.escape(approved_decision(gate_id, tool_call))
+
+    Module.create(
+      module,
+      quote do
+        def get_by_gate_id(unquote(gate_id)), do: unquote(gated)
+
+        def claim_gate_for_approval(unquote(gate_id), "operator:demo"),
+          do: {:ok, unquote(approved)}
+
+        def update_decision(decision, _attrs),
+          do: {:ok, %{decision | decision: "executed", result_status: "ok"}}
+      end,
+      Macro.Env.location(__ENV__)
+    )
+
+    module
+  end
+
+  defp gated_decision(gate_id, %ToolCall{} = tool_call) do
+    decision_fixture(gate_id, tool_call, "gated")
+  end
+
+  defp approved_decision(gate_id, %ToolCall{} = tool_call) do
+    decision_fixture(gate_id, tool_call, "approved")
+  end
+
+  defp decision_fixture(gate_id, %ToolCall{} = tool_call, decision) do
+    %Decision{
+      id: Ecto.UUID.generate(),
+      request_id: tool_call.request_id,
+      gate_id: gate_id,
+      alert_id: tool_call.alert_id,
+      agent_id: tool_call.agent_id,
+      agent_pid_inspect: tool_call.agent_pid_inspect,
+      tool: Atom.to_string(tool_call.tool),
+      args: %{"argv" => tool_call.args},
+      extracted_verb: "rollout undo",
+      classification: "write_prod_high",
+      decision: decision,
+      result_summary: Jason.encode!(%{"reasoning_context" => tool_call.reasoning_context})
+    }
+  end
+
+  defp unique(prefix), do: "#{prefix}_#{System.unique_integer([:positive])}"
 end
