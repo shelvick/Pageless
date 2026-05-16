@@ -126,6 +126,24 @@ defmodule Pageless.Governance.CapabilityGateTest do
       assert decision.result_summary =~ ":empty_args"
     end
 
+    test "request/3 rejects runaway scale replicas without dispatch", %{
+      pubsub: pubsub,
+      rules: rules
+    } do
+      tool_call = tool_call(:kubectl, ["scale", "deployment/payments-api", "--replicas=+10000"])
+
+      assert CapabilityGate.request(tool_call, rules, opts(pubsub, unexpected_dispatch())) ==
+               {:error, {:forbidden_replicas, "+10000"}}
+
+      assert %Decision{
+               decision: "rejected",
+               classification: "write_prod_high",
+               result_status: "error"
+             } = decision = Repo.get_by(Decision, request_id: tool_call.request_id)
+
+      assert decision.result_summary =~ ~s({:forbidden_replicas, "+10000"})
+    end
+
     test "request/3 returns :unknown_tool without writing audit row", %{
       pubsub: pubsub,
       rules: rules

@@ -173,6 +173,112 @@ defmodule PagelessWeb.Components.AgentTreeViewTest do
       assert mutate_projection(projection, {:reasoning_line, "missing-agent", "late line"}) ==
                projection
     end
+
+    test ":triager_classified records the classification on the triager node" do
+      projection =
+        empty_projection() |> mutate_projection({:triager_spawned, "triager-1", "alert-x"})
+
+      classification = %{
+        class: :service_down_with_recent_deploy,
+        confidence: 0.91,
+        topology: :parallel,
+        profiles: [:logs, :metrics, :deploys]
+      }
+
+      %{node_data: node_data} =
+        mutate_projection(
+          projection,
+          {:triager_classified, "triager-1", "alert-x", classification}
+        )
+
+      assert node_data["triager-1"].status == :tool_active
+      assert node_data["triager-1"].payload[:class] == :service_down_with_recent_deploy
+      assert node_data["triager-1"].payload[:confidence] == 0.91
+      assert node_data["triager-1"].payload[:topology] == :parallel
+      assert node_data["triager-1"].payload[:profiles] == [:logs, :metrics, :deploys]
+    end
+
+    test ":triager_failed marks the triager done with the failure reason" do
+      projection =
+        empty_projection() |> mutate_projection({:triager_spawned, "triager-1", "alert-x"})
+
+      %{node_data: node_data} =
+        mutate_projection(
+          projection,
+          {:triager_failed, "triager-1", "alert-x", :gemini_unavailable}
+        )
+
+      assert node_data["triager-1"].status == :done
+      assert node_data["triager-1"].payload[:failed] == :gemini_unavailable
+    end
+
+    test ":tool_hallucination appends a reasoning line on the offending agent" do
+      projection = investigator_projection()
+      logs_id = investigator_id(projection.node_data, :logs)
+      metrics_id = investigator_id(projection.node_data, :metrics)
+      metrics_before = projection.node_data[metrics_id]
+
+      %{node_data: node_data} =
+        mutate_projection(projection, {:tool_hallucination, logs_id, "kubectl_destroy"})
+
+      refute node_data[logs_id].reasoning == []
+      assert Enum.any?(node_data[logs_id].reasoning, &(&1 =~ "kubectl_destroy"))
+      assert node_data[metrics_id] == metrics_before
+    end
+
+    test ":investigation_complete marks the matching investigator done with findings" do
+      projection = investigator_projection()
+      logs_id = investigator_id(projection.node_data, :logs)
+      metrics_id = investigator_id(projection.node_data, :metrics)
+      metrics_before = projection.node_data[metrics_id]
+      findings = %{hypothesis: "bad deploy v2.4.1", confidence: 0.91}
+
+      %{node_data: node_data} =
+        mutate_projection(
+          projection,
+          {:investigation_complete, "alert-x", :logs, findings}
+        )
+
+      assert node_data[logs_id].status == :done
+      assert node_data[logs_id].payload[:findings] == findings
+      assert node_data[metrics_id] == metrics_before
+    end
+
+    test ":investigation_failed marks the matching investigator done with the reason" do
+      projection = investigator_projection()
+      metrics_id = investigator_id(projection.node_data, :metrics)
+      logs_id = investigator_id(projection.node_data, :logs)
+      logs_before = projection.node_data[logs_id]
+
+      %{node_data: node_data} =
+        mutate_projection(
+          projection,
+          {:investigation_failed, "alert-x", :metrics, :gemini_unavailable}
+        )
+
+      assert node_data[metrics_id].status == :done
+      assert node_data[metrics_id].payload[:failed] == :gemini_unavailable
+      assert node_data[logs_id] == logs_before
+    end
+
+    test ":page_out_failed marks the escalator done with the failure reason" do
+      projection =
+        remediator_projection()
+        |> mutate_projection(
+          {:remediator_escalating, "remediator-1", "alert-x", self(), "operator denied"}
+        )
+
+      escalator_id = escalator_id(projection.node_data)
+
+      %{node_data: node_data} =
+        mutate_projection(
+          projection,
+          {:page_out_failed, escalator_id, "alert-x", :pagerduty_unreachable}
+        )
+
+      assert node_data[escalator_id].status == :done
+      assert node_data[escalator_id].payload[:failed] == :pagerduty_unreachable
+    end
   end
 
   describe "dashboard forwarding integration" do
@@ -218,7 +324,7 @@ defmodule PagelessWeb.Components.AgentTreeViewTest do
       Phoenix.PubSub.broadcast(
         broker,
         "alert:#{envelope.alert_id}",
-        {:reasoning_line, "investigator-logs-1", "Errors begin at 03:44:12"}
+        {:reasoning_line, "investigator-logs-1", envelope.alert_id, "Errors begin at 03:44:12"}
       )
 
       reasoning_html = render(view)

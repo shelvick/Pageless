@@ -137,7 +137,7 @@ defmodule Pageless.Proc.Escalator do
     state =
       state
       |> append(:reasoning_line, %{text: reasoning})
-      |> broadcast({:escalator_reasoning, state.agent_id, reasoning})
+      |> broadcast({:escalator_reasoning, state.agent_id, state.alert_id, reasoning})
 
     case state.resolve_client.escalate(state.envelope, page_payload,
            routing_key: state.routing_key,

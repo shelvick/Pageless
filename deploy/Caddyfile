@@ -1,0 +1,20 @@
+# Required env var (read by Caddy at config load): VKE_EGRESS_IP — the
+# cluster's egress NAT IP, the only sender allowed to reach /webhook/*.
+:443 {
+  @webhooks path /webhook/*
+  handle @webhooks {
+    @allowed_sender client_ip {$VKE_EGRESS_IP}
+    handle @allowed_sender {
+      reverse_proxy 127.0.0.1:4040 {
+        header_up X-Forwarded-For {remote_host}
+      }
+    }
+    respond "" 403
+  }
+
+  handle {
+    reverse_proxy 127.0.0.1:4040 {
+      header_up X-Forwarded-For {remote_host}
+    }
+  }
+}

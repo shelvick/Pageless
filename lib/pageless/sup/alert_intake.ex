@@ -66,6 +66,10 @@ defmodule Pageless.Sup.AlertIntake do
     Logger.debug("ignored alert supervisor for #{envelope.alert_id}")
   end
 
+  defp log_start_result({:error, :max_children}, envelope) do
+    Logger.warning("alert tree at max_children; shedding alert #{envelope.alert_id}")
+  end
+
   defp log_start_result({:error, reason}, envelope) do
     Logger.warning(
       "failed to start alert supervisor for #{envelope.alert_id}: #{inspect(reason)}"

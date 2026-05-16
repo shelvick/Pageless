@@ -101,7 +101,7 @@ defmodule Pageless.Proc.RemediatorTest do
       :ok = Remediator.kick_off(pid)
       monitor_ref = Process.monitor(pid)
 
-      assert_receive {:remediator_reasoning, ^agent_id, rationale}
+      assert_receive {:remediator_reasoning, ^agent_id, "alert-remediator", rationale}
       assert rationale =~ "Restart loops back"
 
       assert_receive {:gate_fired, gate_id, tool_call, :write_prod_high, "rollout undo", context}

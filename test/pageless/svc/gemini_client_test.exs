@@ -1,3 +1,15 @@
+defmodule Pageless.Svc.GeminiClientTest.BudgetBlockedGemini do
+  @moduledoc "Gemini double that fails the test if budget exhaustion does not short-circuit."
+
+  @doc "Raises when a budget-exhausted path still dispatches a non-streaming call."
+  @spec generate_content(String.t(), keyword()) :: no_return()
+  def generate_content(_prompt, _opts), do: raise("Gemini dispatch should be budget-blocked")
+
+  @doc "Raises when a budget-exhausted path still dispatches a streaming call."
+  @spec stream_generate(String.t(), keyword()) :: no_return()
+  def stream_generate(_prompt, _opts), do: raise("Gemini stream should be budget-blocked")
+end
+
 defmodule Pageless.Svc.GeminiClientTest.FakeGemini do
   @moduledoc "Deterministic Gemini-shaped test double for adapter tests."
 
@@ -140,6 +152,7 @@ defmodule Pageless.Svc.GeminiClientTest do
   alias Pageless.Svc.GeminiClient.Chunk
   alias Pageless.Svc.GeminiClient.FunctionCall
   alias Pageless.Svc.GeminiClient.Response
+  alias Pageless.Svc.GeminiClientTest.BudgetBlockedGemini
   alias Pageless.Svc.GeminiClientTest.FakeGemini
 
   setup :verify_on_exit!
@@ -297,6 +310,20 @@ defmodule Pageless.Svc.GeminiClientTest do
                       _stop_measurements, stop_metadata}
 
       assert stop_metadata.model == "gemini-2.5-flash"
+    end
+
+    test "returns budget exhaustion without dispatching to Gemini" do
+      budget =
+        start_supervised!({Pageless.GeminiBudget, cap: 0, clock: fixed_clock(~D[2026-05-15])})
+
+      assert {:error, :budget_exhausted} =
+               GeminiClient.generate(
+                 prompt: "Say OK",
+                 model: :flash,
+                 api_key: "test-key",
+                 budget: budget,
+                 gemini_module: BudgetBlockedGemini
+               )
     end
   end
 
@@ -480,6 +507,25 @@ defmodule Pageless.Svc.GeminiClientTest do
 
       assert done_metadata.ref == ref
     end
+
+    test "returns budget exhaustion synchronously without starting a stream" do
+      budget =
+        start_supervised!({Pageless.GeminiBudget, cap: 0, clock: fixed_clock(~D[2026-05-15])})
+
+      assert {:error, :budget_exhausted} =
+               GeminiClient.start_stream(
+                 prompt: "stream a short answer",
+                 model: :flash,
+                 caller: self(),
+                 api_key: "test-key",
+                 budget: budget,
+                 gemini_module: BudgetBlockedGemini
+               )
+
+      refute_receive {:gemini_chunk, _ref, _chunk}
+      refute_receive {:gemini_done, _ref, _final}
+      refute_receive {:gemini_error, _ref, _reason}
+    end
   end
 
   defp collect_stream_messages(ref, acc) when is_reference(ref) do
@@ -536,6 +582,8 @@ defmodule Pageless.Svc.GeminiClientTest do
 
   defp chunk_for_ref?({:gemini_chunk, ref, %{__struct__: Chunk, ref: ref}}, ref), do: true
   defp chunk_for_ref?(_message, _ref), do: false
+
+  defp fixed_clock(date), do: fn -> date end
 
   defp restart_pod_tool do
     %{

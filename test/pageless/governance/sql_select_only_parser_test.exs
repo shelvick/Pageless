@@ -207,6 +207,167 @@ defmodule Pageless.Governance.SqlSelectOnlyParserTest do
     end
   end
 
+  describe "extract_relations/1" do
+    test "extracts a single FROM relation" do
+      assert SqlSelectOnlyParser.extract_relations("SELECT * FROM deploys") == {:ok, ["deploys"]}
+    end
+
+    test "preserves schema qualification" do
+      assert SqlSelectOnlyParser.extract_relations("SELECT * FROM public.deploys") ==
+               {:ok, ["public.deploys"]}
+    end
+
+    test "finds both sides of a JOIN" do
+      sql = "SELECT * FROM deploys d JOIN services s ON d.service_id = s.id"
+
+      assert SqlSelectOnlyParser.extract_relations(sql) == {:ok, ["deploys", "services"]}
+    end
+
+    test "walks into FROM subqueries" do
+      sql = "SELECT * FROM (SELECT id FROM deploys) AS sub"
+
+      assert SqlSelectOnlyParser.extract_relations(sql) == {:ok, ["deploys"]}
+    end
+
+    test "returns base tables inside CTEs but not CTE aliases" do
+      sql = "WITH recent AS (SELECT * FROM deploys) SELECT * FROM recent"
+
+      assert SqlSelectOnlyParser.extract_relations(sql) == {:ok, ["deploys"]}
+    end
+
+    test "transitively resolves CTE-to-CTE references" do
+      sql = "WITH a AS (SELECT * FROM deploys), b AS (SELECT * FROM a) SELECT * FROM b"
+
+      assert SqlSelectOnlyParser.extract_relations(sql) == {:ok, ["deploys"]}
+    end
+
+    test "deduplicates repeated relations" do
+      sql = "SELECT * FROM deploys d1 JOIN deploys d2 ON d1.id < d2.id"
+
+      assert SqlSelectOnlyParser.extract_relations(sql) == {:ok, ["deploys"]}
+    end
+
+    test "walks lateral subquery relations" do
+      sql =
+        "SELECT * FROM deploys d JOIN LATERAL (SELECT * FROM services s WHERE s.id = d.service_id) svc ON true"
+
+      assert SqlSelectOnlyParser.extract_relations(sql) == {:ok, ["deploys", "services"]}
+    end
+
+    test "returns empty list for SELECT with no FROM" do
+      assert SqlSelectOnlyParser.extract_relations("SELECT 1") == {:ok, []}
+    end
+
+    test "preserves relation-name case" do
+      assert SqlSelectOnlyParser.extract_relations("SELECT * FROM Deploys") == {:ok, ["Deploys"]}
+    end
+
+    test "returns binary relation names" do
+      assert {:ok, relations} = SqlSelectOnlyParser.extract_relations("SELECT * FROM deploys")
+      assert Enum.all?(relations, &is_binary/1)
+    end
+
+    test "returns :parse_failure on parse error" do
+      assert SqlSelectOnlyParser.extract_relations("not valid sql") == {:error, :parse_failure}
+    end
+
+    test "rejects non-SELECT statements" do
+      assert SqlSelectOnlyParser.extract_relations("DELETE FROM deploys") == {:error, :not_select}
+    end
+
+    test "does not apply function blocklist" do
+      assert SqlSelectOnlyParser.extract_relations("SELECT pg_sleep(1) FROM deploys") ==
+               {:ok, ["deploys"]}
+    end
+  end
+
+  describe "validate/2 applies allowed_tables" do
+    test "accepts allowed relations and enforces changed allowlist" do
+      assert SqlSelectOnlyParser.validate("SELECT * FROM deploys", allowed_tables: ["deploys"]) ==
+               {:ok, :read}
+
+      assert SqlSelectOnlyParser.validate("SELECT * FROM deploys", allowed_tables: ["services"]) ==
+               {:error, {:table_not_allowed, "deploys"}}
+    end
+
+    test "rejects relations outside the allowlist" do
+      assert SqlSelectOnlyParser.validate(
+               "SELECT * FROM audit_trail_decisions",
+               allowed_tables: ["deploys"]
+             ) == {:error, {:table_not_allowed, "audit_trail_decisions"}}
+    end
+
+    test "accepts any relation by default while keeping hardcoded floor" do
+      assert SqlSelectOnlyParser.validate("SELECT * FROM any_table", function_blocklist: []) ==
+               {:ok, :read}
+
+      assert SqlSelectOnlyParser.validate("SELECT pg_sleep(1) FROM any_table",
+               function_blocklist: []
+             ) ==
+               {:error, {:state_modifying_function, "pg_sleep"}}
+    end
+
+    test "matches case-insensitively" do
+      assert SqlSelectOnlyParser.validate("SELECT * FROM Deploys", allowed_tables: ["deploys"]) ==
+               {:ok, :read}
+    end
+
+    test "rejects CTE-laundered access to disallowed table" do
+      sql = "WITH legal AS (SELECT * FROM forbidden_table) SELECT * FROM legal"
+
+      assert SqlSelectOnlyParser.validate(sql, allowed_tables: ["legal"]) ==
+               {:error, {:table_not_allowed, "forbidden_table"}}
+    end
+
+    test "rejects subquery-laundered access" do
+      sql = "SELECT * FROM (SELECT * FROM forbidden_table) AS sub"
+
+      assert SqlSelectOnlyParser.validate(sql, allowed_tables: ["sub"]) ==
+               {:error, {:table_not_allowed, "forbidden_table"}}
+    end
+
+    test "rejects nested EXISTS subquery access" do
+      sql = "SELECT EXISTS(SELECT 1 FROM forbidden_table)"
+
+      assert SqlSelectOnlyParser.validate(sql, allowed_tables: ["deploys"]) ==
+               {:error, {:table_not_allowed, "forbidden_table"}}
+    end
+
+    test "enforces strict schema-qualified matching" do
+      assert SqlSelectOnlyParser.validate("SELECT * FROM public.deploys",
+               allowed_tables: ["deploys"]
+             ) ==
+               {:error, {:table_not_allowed, "public.deploys"}}
+    end
+  end
+
+  describe ":no_rangetable rejection" do
+    test "rejects relation-free SELECTs when allowed_tables is restricted" do
+      cases = [
+        {"SELECT 1", ["deploys"]},
+        {"SELECT generate_series(1, 10)", ["deploys"]},
+        {"SELECT now()", ["deploys"]},
+        {"WITH x AS (SELECT 1) SELECT * FROM x", ["x"]}
+      ]
+
+      for {sql, allowed_tables} <- cases do
+        assert SqlSelectOnlyParser.validate(sql, allowed_tables: allowed_tables) ==
+                 {:error, :no_rangetable}
+      end
+    end
+
+    test "preserves unrestricted :all behavior for relation-free SELECTs" do
+      for sql <- [
+            "SELECT 1",
+            "SELECT generate_series(1, 10)",
+            "SELECT now()",
+            "WITH x AS (SELECT 1) SELECT * FROM x"
+          ] do
+        assert SqlSelectOnlyParser.validate(sql, allowed_tables: :all) == {:ok, :read}
+      end
+    end
+  end
+
   describe "validate/2 applies the function blocklist" do
     test "rejects SELECT calling pg_terminate_backend (S3 beat)" do
       sql =
@@ -256,6 +417,56 @@ defmodule Pageless.Governance.SqlSelectOnlyParserTest do
 
       assert SqlSelectOnlyParser.validate(sql, function_blocklist: ["pg_terminate_backend"]) ==
                {:error, {:state_modifying_function, "pg_terminate_backend"}}
+    end
+
+    test "rejects pg_read_file via hardcoded floor without yaml entries" do
+      assert SqlSelectOnlyParser.validate("SELECT pg_read_file('/etc/passwd')") ==
+               {:error, {:state_modifying_function, "pg_read_file"}}
+    end
+
+    test "rejects every function in the hardcoded floor with no yaml entries" do
+      assert SqlSelectOnlyParser.hardcoded_function_blocklist_floor() == [
+               "pg_read_file",
+               "pg_read_binary_file",
+               "pg_ls_dir",
+               "pg_stat_file",
+               "lo_export",
+               "lo_import",
+               "lo_get",
+               "lo_put",
+               "lo_from_bytea",
+               "dblink_send_query",
+               "dblink_get_result",
+               "pg_sleep",
+               "pg_logical_emit_message"
+             ]
+
+      for function_name <- SqlSelectOnlyParser.hardcoded_function_blocklist_floor() do
+        sql = "SELECT #{function_name}()"
+
+        assert SqlSelectOnlyParser.validate(sql) ==
+                 {:error, {:state_modifying_function, function_name}}
+      end
+    end
+
+    test "hardcoded floor is not suppressible by empty function_blocklist opt" do
+      assert SqlSelectOnlyParser.validate("SELECT pg_sleep(10)", function_blocklist: []) ==
+               {:error, {:state_modifying_function, "pg_sleep"}}
+    end
+
+    test "hardcoded floor matches schema-qualified function names" do
+      assert SqlSelectOnlyParser.validate("SELECT pg_catalog.pg_read_file('/etc/passwd')") ==
+               {:error, {:state_modifying_function, "pg_read_file"}}
+    end
+
+    test "effective blocklist is union of floor and yaml" do
+      assert SqlSelectOnlyParser.validate("SELECT custom_fn()", function_blocklist: ["custom_fn"]) ==
+               {:error, {:state_modifying_function, "custom_fn"}}
+
+      assert SqlSelectOnlyParser.validate("SELECT pg_sleep(10)",
+               function_blocklist: ["custom_fn"]
+             ) ==
+               {:error, {:state_modifying_function, "pg_sleep"}}
     end
   end
 

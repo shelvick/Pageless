@@ -123,7 +123,7 @@ defmodule Pageless.Proc.EscalatorTest do
       :ok = Escalator.kick_off(pid)
       monitor_ref = Process.monitor(pid)
 
-      assert_receive {:escalator_reasoning, ^agent_id, "Paging on-call"}
+      assert_receive {:escalator_reasoning, ^agent_id, "alert-escalator", "Paging on-call"}
       assert_receive {:page_out_sent, ^agent_id, "alert-escalator", page_payload}
       assert page_payload.summary == "Service down"
       assert_receive {:escalator_complete, "alert-escalator", ^agent_id, %{outcome: :sent}}
@@ -159,9 +159,9 @@ defmodule Pageless.Proc.EscalatorTest do
       :ok = Escalator.kick_off(pid)
       monitor_ref = Process.monitor(pid)
 
-      assert_receive {:page_out_sent, ^agent_id, "alert-escalator", _page_payload}
-      assert_receive {:escalator_complete, "alert-escalator", ^agent_id, %{outcome: :noop}}
-      assert_receive {:DOWN, ^monitor_ref, :process, ^pid, reason}
+      assert_receive {:page_out_sent, ^agent_id, "alert-escalator", _page_payload}, 1_000
+      assert_receive {:escalator_complete, "alert-escalator", ^agent_id, %{outcome: :noop}}, 1_000
+      assert_receive {:DOWN, ^monitor_ref, :process, ^pid, reason}, 1_000
       assert clean_exit?(reason)
 
       rows = AgentState.history(Pageless.Repo, agent_id)

@@ -7,6 +7,7 @@ Top-level Pageless application modules.
 - `audit_trail/` — audit trail schema + behaviour for `audit_trail_decisions`.
 - `config/` and `config/rules/` — `pageless.yaml` loader + supervised Agent.
 - `governance/` — capability gate, classifiers, parser, tool-call envelope.
+- `proc/`, `proc/investigator/`, `proc/remediator/` — Triager / Investigator / Remediator / Escalator GenServers plus their extracted helper modules. Investigator helpers: `Profile`, `ScopeGuard` + `ProfileScope` (profile-scope check), `Events`, `Audit` (audit writer), `Gemini`, `Prompt` (prompt builder), `JsonSafe` (JSON-safe reshape), `ToolArgs` (tool-arg normalization). Remediator helpers: `Proposal` (proposal normalizer), `Gemini`, `Prompt`. The submodule layout reflects a 500-line module-size cap on the parent GenServers; helpers were extracted when the parents grew past it.
 
 ## Top-level modules
 

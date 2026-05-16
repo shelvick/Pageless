@@ -14,6 +14,12 @@ defmodule Pageless.Svc.GeminiClient do
   @impl Behaviour
   @spec generate(Behaviour.generate_opts()) :: {:ok, Response.t()} | {:error, term()}
   def generate(opts) do
+    with :ok <- claim_budget(opts) do
+      generate_after_budget_claim(opts)
+    end
+  end
+
+  defp generate_after_budget_claim(opts) do
     prompt = Keyword.fetch!(opts, :prompt)
     model = opts |> Keyword.get(:model, :flash) |> model_name()
     metadata = Keyword.get(opts, :metadata, %{})
@@ -53,6 +59,12 @@ defmodule Pageless.Svc.GeminiClient do
   @impl Behaviour
   @spec start_stream(Behaviour.stream_opts()) :: {:ok, reference()} | {:error, term()}
   def start_stream(opts) do
+    with :ok <- claim_budget(opts) do
+      start_stream_after_budget_claim(opts)
+    end
+  end
+
+  defp start_stream_after_budget_claim(opts) do
     prompt = Keyword.fetch!(opts, :prompt)
     caller = Keyword.get(opts, :caller, self())
     ref = make_ref()
@@ -83,6 +95,13 @@ defmodule Pageless.Svc.GeminiClient do
           model: String.t(),
           metadata: map()
         }
+
+  @spec claim_budget(keyword()) :: :ok | {:error, :budget_exhausted}
+  defp claim_budget(opts) do
+    opts
+    |> Keyword.get(:budget, Pageless.GeminiBudget)
+    |> Pageless.GeminiBudget.increment()
+  end
 
   @spec translate_stream(module(), String.t() | [map()], keyword(), stream_context()) :: :ok
   defp translate_stream(gemini_module, prompt, opts, context) do

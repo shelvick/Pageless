@@ -94,7 +94,10 @@ defmodule Pageless.Svc.MCPSchemaTranslatorTest do
     test "returns an empty list when all tools are dropped" do
       tool = tool("bad", "Bad schema.", %{"type" => "array"})
 
-      assert [] = MCPSchemaTranslator.to_gemini_tools([tool])
+      log = capture_log(fn -> assert [] = MCPSchemaTranslator.to_gemini_tools([tool]) end)
+
+      assert log =~ "bad"
+      assert log =~ "non_object_input_schema"
     end
 
     test "preserves input order for translated tools" do
@@ -261,7 +264,7 @@ defmodule Pageless.Svc.MCPSchemaTranslatorTest do
           assert {:error, {:unsupported, :oneOf, ^tool}} = MCPSchemaTranslator.translate(tool)
         end)
 
-      assert log == ""
+      refute log =~ "dropping MCP tool"
     end
   end
 

@@ -101,9 +101,39 @@ defmodule Pageless.AuditTrailTest do
       assert_changeset_error(changeset, :gate_id)
     end
 
-    test "rejects unknown tool name" do
+    test "rejects invalid tool name" do
       assert {:error, changeset} = AuditTrail.record_decision(valid_attrs(%{tool: "rm_rf"}))
       assert_changeset_error(changeset, :tool)
+    end
+
+    test "restricts unknown tool to profile_violation" do
+      assert {:error, changeset} =
+               AuditTrail.record_decision(
+                 valid_attrs(%{
+                   tool: "unknown",
+                   args: %{"function_name" => "steal_secrets", "raw_args" => %{}},
+                   decision: "execute"
+                 })
+               )
+
+      assert_changeset_error(changeset, :tool)
+    end
+
+    test "validates unknown-tool args" do
+      for args <- [%{}, %{"function_name" => "steal_secrets"}, %{"raw_args" => %{}}] do
+        assert {:error, changeset} =
+                 AuditTrail.record_decision(
+                   valid_attrs(%{
+                     tool: "unknown",
+                     args: args,
+                     decision: "profile_violation",
+                     result_status: "error",
+                     result_summary: ":out_of_scope_tool"
+                   })
+                 )
+
+        assert_changeset_error(changeset, :args)
+      end
     end
 
     test "rejects unknown classification" do
@@ -181,6 +211,151 @@ defmodule Pageless.AuditTrailTest do
       )
 
       assert %{args: ^args} = AuditTrail.get_by_gate_id(gate_id)
+    end
+
+    test "accepts profile_violation as initial terminal decision" do
+      attrs =
+        valid_attrs(%{
+          tool: "unknown",
+          args: %{"function_name" => "steal_secrets", "raw_args" => %{"kind" => "prompt"}},
+          extracted_verb: nil,
+          classification: "read",
+          decision: "profile_violation",
+          result_status: "error",
+          result_summary: ":out_of_scope_tool"
+        })
+
+      assert {:ok, decision} = AuditTrail.record_decision(attrs)
+      assert decision.decision == "profile_violation"
+      assert decision.tool == "unknown"
+      assert decision.gate_id == nil
+      assert decision.operator_ref == nil
+      assert decision.result_status == "error"
+      assert decision.result_summary == ":out_of_scope_tool"
+    end
+
+    test "accepts budget_exhausted as initial terminal decision" do
+      attrs =
+        valid_attrs(%{
+          classification: "read",
+          decision: "budget_exhausted",
+          result_status: "error",
+          result_summary: ":budget_exhausted"
+        })
+
+      assert {:ok, decision} = AuditTrail.record_decision(attrs)
+      assert decision.decision == "budget_exhausted"
+      assert decision.gate_id == nil
+      assert decision.operator_ref == nil
+      assert decision.result_status == "error"
+      assert decision.result_summary == ":budget_exhausted"
+    end
+
+    test "requires result fields on profile_violation" do
+      for overrides <- [
+            %{result_status: "ok", result_summary: ":out_of_scope_tool"},
+            %{result_status: nil, result_summary: ":out_of_scope_tool"},
+            %{result_status: "error", result_summary: nil},
+            %{result_status: "error", result_summary: ""}
+          ] do
+        attrs =
+          valid_attrs(
+            Map.merge(
+              %{
+                decision: "profile_violation",
+                result_status: "error",
+                result_summary: ":out_of_scope_tool"
+              },
+              overrides
+            )
+          )
+
+        assert {:error, changeset} = AuditTrail.record_decision(attrs)
+
+        if overrides.result_status != "error" do
+          assert_changeset_error(changeset, :result_status)
+        end
+
+        if is_nil(overrides.result_summary) or overrides.result_summary == "" do
+          assert_changeset_error(changeset, :result_summary)
+        end
+      end
+    end
+
+    test "rejects gate_id on profile_violation rows" do
+      assert {:error, changeset} =
+               AuditTrail.record_decision(
+                 valid_attrs(%{
+                   gate_id: unique("gate"),
+                   decision: "profile_violation",
+                   result_status: "error",
+                   result_summary: ":verb_not_in_profile"
+                 })
+               )
+
+      assert_changeset_error(changeset, :gate_id)
+    end
+
+    test "rejects gate_id on budget_exhausted rows" do
+      assert {:error, changeset} =
+               AuditTrail.record_decision(
+                 valid_attrs(%{
+                   gate_id: unique("gate"),
+                   decision: "budget_exhausted",
+                   result_status: "error",
+                   result_summary: ":budget_exhausted"
+                 })
+               )
+
+      assert_changeset_error(changeset, :gate_id)
+    end
+
+    test "requires canonical budget_exhausted result" do
+      for overrides <- [
+            %{result_status: "ok", result_summary: ":budget_exhausted"},
+            %{result_status: nil, result_summary: ":budget_exhausted"},
+            %{result_status: "error", result_summary: ":other_reason"},
+            %{result_status: "error", result_summary: nil}
+          ] do
+        attrs =
+          valid_attrs(
+            Map.merge(
+              %{
+                decision: "budget_exhausted",
+                result_status: "error",
+                result_summary: ":budget_exhausted"
+              },
+              overrides
+            )
+          )
+
+        assert {:error, changeset} = AuditTrail.record_decision(attrs)
+
+        if overrides.result_status != "error" do
+          assert_changeset_error(changeset, :result_status)
+        end
+
+        if overrides.result_summary != ":budget_exhausted" do
+          assert_changeset_error(changeset, :result_summary)
+        end
+      end
+    end
+
+    test "rejects operator fields on pre-gate rows" do
+      for decision <- ["profile_violation", "budget_exhausted"],
+          field <- [:operator_ref, :denial_reason] do
+        attrs =
+          %{field => "operator-data"}
+          |> Map.merge(%{
+            decision: decision,
+            result_status: "error",
+            result_summary: terminal_summary(decision)
+          })
+          |> valid_attrs()
+
+        assert {:error, changeset} = AuditTrail.record_decision(attrs)
+        assert_changeset_error(changeset, field)
+      end
     end
   end
 
@@ -366,6 +541,58 @@ defmodule Pageless.AuditTrailTest do
 
       assert_changeset_error(changeset, :decision)
     end
+
+    test "rejects any transition out of profile_violation" do
+      decision =
+        insert_decision!(
+          decision: "profile_violation",
+          result_status: "error",
+          result_summary: ":table_not_in_profile_allowlist"
+        )
+
+      for target <- terminal_transition_targets("profile_violation") do
+        assert {:error, changeset} =
+                 AuditTrail.update_decision(decision, terminal_attrs(target))
+
+        assert_changeset_error(changeset, :decision)
+      end
+    end
+
+    test "rejects any transition out of budget_exhausted" do
+      decision =
+        insert_decision!(
+          decision: "budget_exhausted",
+          result_status: "error",
+          result_summary: ":budget_exhausted"
+        )
+
+      for target <- terminal_transition_targets("budget_exhausted") do
+        assert {:error, changeset} =
+                 AuditTrail.update_decision(decision, terminal_attrs(target))
+
+        assert_changeset_error(changeset, :decision)
+      end
+    end
+
+    test "rejects transitions INTO terminal pre-gate decisions" do
+      decisions = [
+        insert_decision!(
+          gate_id: unique("gate"),
+          classification: "write_prod_high",
+          decision: "gated"
+        ),
+        insert_decision!(decision: "execute"),
+        approved_decision()
+      ]
+
+      for decision <- decisions,
+          target <- ["profile_violation", "budget_exhausted"] do
+        assert {:error, changeset} =
+                 AuditTrail.update_decision(decision, terminal_attrs(target))
+
+        assert_changeset_error(changeset, :decision)
+      end
+    end
   end
 
   describe "claim gates" do
@@ -463,6 +690,45 @@ defmodule Pageless.AuditTrailTest do
       assert decision in ["approved", "denied"]
     end
   end
+
+  defp terminal_summary("profile_violation"), do: ":out_of_scope_tool"
+  defp terminal_summary("budget_exhausted"), do: ":budget_exhausted"
+
+  defp terminal_transition_targets(current) do
+    [
+      "gated",
+      "approved",
+      "denied",
+      "execute",
+      "audit_and_execute",
+      "executed",
+      "execution_failed",
+      "rejected",
+      "profile_violation",
+      "budget_exhausted"
+    ]
+    |> Enum.reject(&(&1 == current))
+  end
+
+  defp terminal_attrs("approved"), do: %{decision: "approved", operator_ref: "operator-1"}
+
+  defp terminal_attrs("denied") do
+    %{decision: "denied", operator_ref: "operator-1", denial_reason: "unsafe"}
+  end
+
+  defp terminal_attrs(decision) when decision in ["executed", "execution_failed"] do
+    %{decision: decision, result_status: "error", result_summary: "terminal update"}
+  end
+
+  defp terminal_attrs("profile_violation") do
+    %{decision: "profile_violation", result_status: "error", result_summary: ":out_of_scope_tool"}
+  end
+
+  defp terminal_attrs("budget_exhausted") do
+    %{decision: "budget_exhausted", result_status: "error", result_summary: ":budget_exhausted"}
+  end
+
+  defp terminal_attrs(decision), do: %{decision: decision}
 
   defp approved_decision do
     insert_decision!(

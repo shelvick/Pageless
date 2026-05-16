@@ -13,8 +13,11 @@ config :pageless, PagelessWeb.Endpoint,
     formats: [html: PagelessWeb.ErrorHTML, json: PagelessWeb.ErrorJSON],
     layout: false
   ],
-  pubsub_server: Pageless.PubSub,
-  live_view: [signing_salt: System.get_env("LIVE_VIEW_SALT", "dev-only-salt-replace-prod")]
+  pubsub_server: Pageless.PubSub
+
+# Session + LiveView signing salts. Dev/test env defaults live in dev.exs /
+# test.exs; prod values come from SESSION_SIGNING_SALT / LIVE_VIEW_SALT env
+# vars and are required at runtime (see config/runtime.exs).
 
 config :phoenix, :json_library, Jason
 

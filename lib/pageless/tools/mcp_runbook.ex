@@ -8,6 +8,7 @@ defmodule Pageless.Tools.MCPRunbook do
   alias Pageless.Tools.MCPRunbook.Behaviour
 
   @default_mcp_client Pageless.Svc.MCPClient
+  @allowed_tools ~w(read_file list_directory list_allowed_directories)
 
   @doc "Executes an MCP runbook tool call with application defaults."
   @impl true
@@ -33,6 +34,12 @@ defmodule Pageless.Tools.MCPRunbook do
 
       {:error, :invalid_args} ->
         invalid_args()
+
+      {:error, :invalid_args, _name} ->
+        invalid_args()
+
+      {:error, reason, name} when reason in [:tool_not_allowed, :path_escape] ->
+        rejected_call(reason, name)
     end
   end
 
@@ -56,10 +63,69 @@ defmodule Pageless.Tools.MCPRunbook do
 
   defp validate_args(%{"tool_name" => name, "params" => params})
        when is_binary(name) and is_map(params) do
-    {:ok, name, params}
+    validate_allowed_tool(name, params)
   end
 
   defp validate_args(_args), do: {:error, :invalid_args}
+
+  @spec validate_allowed_tool(String.t(), map()) ::
+          {:ok, String.t(), map()}
+          | {:error, :tool_not_allowed | :path_escape | :invalid_args, String.t()}
+  defp validate_allowed_tool(name, _params) when name not in @allowed_tools do
+    {:error, :tool_not_allowed, name}
+  end
+
+  defp validate_allowed_tool("read_file" = name, params),
+    do: validate_read_file_path(name, params)
+
+  defp validate_allowed_tool(name, params), do: {:ok, name, params}
+
+  @spec validate_read_file_path(String.t(), map()) ::
+          {:ok, String.t(), map()} | {:error, :invalid_args | :path_escape, String.t()}
+  defp validate_read_file_path(name, %{"path" => path} = params) when is_binary(path) do
+    if safe_runbook_path?(path) do
+      {:ok, name, params}
+    else
+      {:error, :path_escape, name}
+    end
+  end
+
+  defp validate_read_file_path(name, _params), do: {:error, :invalid_args, name}
+
+  @spec safe_runbook_path?(String.t()) :: boolean()
+  defp safe_runbook_path?(path) do
+    Path.type(path) != :absolute and not parent_segment?(path) and under_runbook_root?(path)
+  end
+
+  @spec parent_segment?(String.t()) :: boolean()
+  defp parent_segment?(path) do
+    path
+    |> Path.split()
+    |> Enum.any?(&(&1 == ".."))
+  end
+
+  @spec under_runbook_root?(String.t()) :: boolean()
+  defp under_runbook_root?(path) do
+    root = runbook_root()
+
+    path
+    |> Path.expand(root)
+    |> path_under?(root)
+  end
+
+  @spec runbook_root() :: String.t()
+  defp runbook_root do
+    :pageless
+    |> :code.priv_dir()
+    |> to_string()
+    |> Path.join("runbooks")
+    |> Path.expand()
+  end
+
+  @spec path_under?(String.t(), String.t()) :: boolean()
+  defp path_under?(path, root) do
+    path == root or String.starts_with?(path, root <> "/")
+  end
 
   @spec call_mcp_tool(module(), String.t(), map(), keyword()) ::
           {:ok, ToolResult.t()} | {:error, term()}
@@ -141,6 +207,12 @@ defmodule Pageless.Tools.MCPRunbook do
   @spec invalid_args() :: {:error, Behaviour.error_result()}
   defp invalid_args do
     {:error, %{reason: :invalid_args, output: nil, exit_status: nil, command: [], duration_ms: 0}}
+  end
+
+  @spec rejected_call(:tool_not_allowed | :path_escape, String.t()) ::
+          {:error, Behaviour.error_result()}
+  defp rejected_call(reason, name) do
+    {:error, %{reason: reason, output: nil, exit_status: nil, command: [name], duration_ms: 0}}
   end
 
   @spec command_summary(String.t(), map()) :: [String.t()]
