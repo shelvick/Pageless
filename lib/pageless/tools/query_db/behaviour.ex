@@ -33,7 +33,8 @@ defmodule Pageless.Tools.QueryDB.Behaviour do
           repo: module(),
           statement_timeout_ms: pos_integer(),
           max_rows: pos_integer(),
-          function_blocklist: [String.t()]
+          function_blocklist: [String.t()],
+          allowed_tables: [String.t()] | :all
         ]
 
   @doc "Executes a query_db tool call with default runtime options."

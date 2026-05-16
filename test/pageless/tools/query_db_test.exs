@@ -61,6 +61,43 @@ defmodule Pageless.Tools.QueryDBTest do
       assert result.command == sql
     end
 
+    test "outer LIMIT caps relation-free result buffering before truncation" do
+      sql = "SELECT * FROM generate_series(1, 1000000) AS s"
+
+      assert {:ok, result} = QueryDB.query(tool_call(sql), repo: Repo, max_rows: 1_000)
+
+      assert length(result.rows) == 1_000
+      assert result.num_rows == 1_000
+      assert result.truncated == true
+      assert result.command == sql
+    end
+
+    test "wrapped query executes when inner SQL has a trailing single-line comment" do
+      sql = "SELECT 1 -- trailing comment"
+
+      assert {:ok, result} = QueryDB.query(tool_call(sql), repo: Repo, allowed_tables: :all)
+
+      assert result.rows == [[1]]
+      assert result.columns == ["?column?"]
+      assert result.num_rows == 1
+      assert result.truncated == false
+      assert result.command == sql
+    end
+
+    test "plumbs allowed_tables into parser and rejects relation-free SQL" do
+      sql = "SELECT * FROM generate_series(1, 100) AS s"
+
+      assert {:error, result} =
+               QueryDB.query(tool_call(sql), repo: Repo, allowed_tables: ["deploys"])
+
+      assert result.reason == {:sql_blocked, :no_rangetable}
+      assert result.rows == nil
+      assert result.columns == nil
+      assert result.num_rows == nil
+      assert result.truncated == false
+      assert result.command == sql
+    end
+
     test "returns all rows when result count is below max_rows" do
       versions = ~w(v2.4.1 v2.4.2 v2.4.3 v2.4.4 v2.4.5)
       insert_deploy_versions(versions)
@@ -131,7 +168,7 @@ defmodule Pageless.Tools.QueryDBTest do
     end
 
     test "returns statement_timeout for slow queries" do
-      sql = "SELECT pg_sleep(2)"
+      sql = "SELECT count(*) FROM generate_series(1, 100000000)"
 
       assert {:error, result} =
                QueryDB.query(tool_call(sql),

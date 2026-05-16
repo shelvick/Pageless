@@ -63,7 +63,7 @@ defmodule Pageless.MixProject do
       {:req, "~> 0.5"},
       {:jason, "~> 1.4"},
       {:yaml_elixir, "~> 2.12"},
-      {:ex_json_schema, "~> 0.10"},
+      {:ex_json_schema, "~> 0.11"},
       {:gemini_ex, "~> 0.13.0"},
 
       # Agent-tree viz

@@ -5,9 +5,12 @@ defmodule Pageless.PayloadNormalizer do
 
   alias Pageless.AlertEnvelope
 
+  @max_alerts 50
+
   @type normalize_error ::
           {:malformed, atom() | String.t()}
           | {:unsupported_version, String.t()}
+          | {:too_many_alerts, pos_integer()}
           | :empty_alerts
 
   @doc "Normalizes a Prometheus Alertmanager webhook payload into alert envelopes."
@@ -27,6 +30,10 @@ defmodule Pageless.PayloadNormalizer do
 
   defp do_normalize_alertmanager(payload) when not is_map_key(payload, "alerts"),
     do: {:error, {:malformed, :alerts}}
+
+  defp do_normalize_alertmanager(%{"alerts" => alerts}) when length(alerts) > @max_alerts do
+    {:error, {:too_many_alerts, length(alerts)}}
+  end
 
   defp do_normalize_alertmanager(%{"alerts" => alerts} = payload) when is_list(alerts) do
     alerts
@@ -84,7 +91,7 @@ defmodule Pageless.PayloadNormalizer do
       alert_id: Ecto.UUID.generate(),
       source: :alertmanager,
       source_ref: payload["groupKey"],
-      fingerprint: Map.get(alert, "fingerprint") || fingerprint_from_labels(labels),
+      fingerprint: fingerprint_from_labels(labels),
       received_at: DateTime.utc_now(),
       started_at: parse_datetime(alert["startsAt"]),
       status: alertmanager_status(alert["status"]),
@@ -157,11 +164,13 @@ defmodule Pageless.PayloadNormalizer do
   end
 
   defp fingerprint_from_labels(labels) do
-    labels
-    |> Jason.encode!()
-    |> then(&:crypto.hash(:sha256, &1))
-    |> Base.encode16(case: :lower)
-    |> binary_part(0, 16)
+    [
+      Map.get(labels, "service", "_unknown"),
+      Map.get(labels, "alertname", "_unknown"),
+      Map.get(labels, "severity", "_unknown"),
+      Map.get(labels, "status", "_unknown")
+    ]
+    |> Enum.join(":")
   end
 
   defp parse_alert_class(parts) do

@@ -56,8 +56,9 @@ Required opts on every call: `tool_dispatch: (ToolCall.t -> {:ok, term} | {:erro
 - `classify/2` and `extract_verb/1`. Strips recognized leading kubectl flags before verb extraction (`-n`, `--namespace`, `--context`, `--cluster`, `--user`, `--kubeconfig`, `--as`, `--as-group`, `--request-timeout`, `--all-namespaces`, `-A`, `--verbose`, `--v`, `--quiet`, inline `--flag=value` form).
 - Compound rollout: `["rollout" | rest]` → strips leading flags inside `rest` before picking subcommand.
 - Scale direction inferred from `--replicas=±N` (synthetic verbs `"scale-up"`/`"scale-down"`); absolute `N` keeps verb `"scale"` (fail-closed default).
+- Replicas magnitude pass (verb-conditional, fires only on `"scale"`): single private `classify_scale_verb/2` runs `extract_replicas/1` (collect-all, reject multi/dangling as `:malformed_args`), an `Integer.parse/1` strict value check, and the symmetric magnitude check (`@replicas_max_delta = 10` on `±N`, `@replicas_max_absolute = 20` on unsigned `N`). Out-of-bound rejects with `{:forbidden_replicas, raw_value :: String.t()}`; non-integer values reject as `:malformed_args`. Then `infer_scale_direction/1` synthesizes `"scale-up"` / `"scale-down"` / `"scale"` from the validated value.
 - Unknown verbs / unknown compounds → `:write_prod_high` (fail-closed default).
-- Verb table is data, not hardcoded. `%Rules{}.kubectl_verbs` injected by caller.
+- Verb table is data, not hardcoded. `%Rules{}.kubectl_verbs` injected by caller. Magnitude caps are hardcoded module attributes (no YAML).
 
 ## SqlSelectOnlyParser specifics
 

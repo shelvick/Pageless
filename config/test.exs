@@ -12,7 +12,13 @@ config :pageless, PagelessWeb.Endpoint,
   http: [ip: {127, 0, 0, 1}, port: 4002],
   secret_key_base:
     "test-key-base-min-64-chars-stable-across-runs-fine-not-a-real-secret-pageless-yo",
+  live_view: [signing_salt: "test-only-live-view-salt-stable-across-runs"],
   server: false
+
+config :pageless, :session_signing_salt, "test-only-session-signing-salt-stable-across-runs"
+config :pageless, :trust_x_forwarded_for, false
+config :pageless, :pagerduty_webhook_required, false
+config :pageless, :pagerduty_webhook_secret, "test-pagerduty-secret"
 
 config :pageless, :kubectl_impl, Pageless.Tools.Kubectl.Mock
 

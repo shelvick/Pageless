@@ -8,7 +8,6 @@
         excluded: [~r"/_build/", ~r"/deps/"]
       },
       requires: [
-        "/home/user/my-cc-credo/lib/credo/check/**/*.ex",
         ".credo/checks/**/*.ex"
       ],
       strict: false,  # Don't fail on refactoring opportunities

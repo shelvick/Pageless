@@ -53,6 +53,62 @@ defmodule Pageless.Tools.MCPRunbookTest do
       assert result.duration_ms >= 0
     end
 
+    test "rejects unallowlisted MCP tools without invoking the MCP client" do
+      for tool_name <- ["write_file", "delete_file"] do
+        expect_no_mcp_call("unallowlisted tools must not call MCP")
+
+        assert {:error, result} =
+                 MCPRunbook.exec(
+                   tool_call(%{
+                     "tool_name" => tool_name,
+                     "params" => %{"path" => "runbooks/payments-api/connection-errors.md"}
+                   }),
+                   mcp_client: Pageless.Svc.MCPClient.Mock
+                 )
+
+        assert result.reason == :tool_not_allowed
+        assert result.output == nil
+        assert result.exit_status == nil
+        assert result.command == [tool_name]
+        assert result.duration_ms == 0
+      end
+    end
+
+    test "rejects absolute read_file paths without invoking the MCP client" do
+      expect_no_mcp_call("absolute read_file paths must not call MCP")
+
+      assert {:error, result} =
+               MCPRunbook.exec(
+                 tool_call(%{
+                   "tool_name" => "read_file",
+                   "params" => %{"path" => "/etc/pageless/release.env"}
+                 }),
+                 mcp_client: Pageless.Svc.MCPClient.Mock
+               )
+
+      assert result.reason == :path_escape
+      assert result.output == nil
+      assert result.exit_status == nil
+      assert result.duration_ms == 0
+    end
+
+    test "rejects parent-segment read_file paths without invoking the MCP client" do
+      for path <- ["../../etc/passwd", "runbooks/../passwd"] do
+        expect_no_mcp_call("parent-segment read_file paths must not call MCP")
+
+        assert {:error, result} =
+                 MCPRunbook.exec(
+                   tool_call(%{"tool_name" => "read_file", "params" => %{"path" => path}}),
+                   mcp_client: Pageless.Svc.MCPClient.Mock
+                 )
+
+        assert result.reason == :path_escape
+        assert result.output == nil
+        assert result.exit_status == nil
+        assert result.duration_ms == 0
+      end
+    end
+
     test "passes explicit client and timeout options to the MCP adapter" do
       call = tool_call(%{"tool_name" => "list_directory", "params" => %{"path" => "runbooks"}})
 
@@ -324,6 +380,12 @@ defmodule Pageless.Tools.MCPRunbookTest do
   defp expect_mcp_call(name, params, result_fun) do
     Pageless.Svc.MCPClient.Mock
     |> expect(:call_tool, fn ^name, ^params, opts -> result_fun.(opts) end)
+  end
+
+  defp expect_no_mcp_call(message) do
+    expect(Pageless.Svc.MCPClient.Mock, :call_tool, 0, fn _name, _params, _opts ->
+      flunk(message)
+    end)
   end
 
   defp tool_result(content, opts \\ []) do

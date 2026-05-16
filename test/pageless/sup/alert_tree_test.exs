@@ -77,6 +77,53 @@ defmodule Pageless.Sup.AlertTreeTest do
       assert Keyword.fetch!(opts, :alert_supervisor) == Pageless.Sup.AlertTreeTest.StubAlert
     end
 
+    test "start_alert/2 returns {:error, :max_children} when the cap is reached", %{
+      pubsub: broker
+    } do
+      tree = start_supervised!({AlertTree, max_children: 1})
+
+      assert {:ok, _first_pid} =
+               AlertTree.start_alert(tree,
+                 envelope: envelope(alert_id: "alert-cap-1"),
+                 pubsub: broker,
+                 alert_supervisor: Pageless.Sup.AlertTreeTest.StubAlert,
+                 caller: self()
+               )
+
+      assert {:error, :max_children} =
+               AlertTree.start_alert(tree,
+                 envelope: envelope(alert_id: "alert-cap-2"),
+                 pubsub: broker,
+                 alert_supervisor: Pageless.Sup.AlertTreeTest.StubAlert,
+                 caller: self()
+               )
+
+      assert DynamicSupervisor.count_children(tree).active == 1
+      assert Process.alive?(tree)
+    end
+
+    test "utilization/1 returns active children divided by max_children", %{pubsub: broker} do
+      tree = start_supervised!({AlertTree, max_children: 2})
+
+      assert AlertTree.utilization(tree) == 0.0
+
+      assert {:ok, _first_pid} =
+               AlertTree.start_alert(tree,
+                 envelope: envelope(alert_id: "alert-utilization-1"),
+                 pubsub: broker,
+                 alert_supervisor: Pageless.Sup.AlertTreeTest.StubAlert,
+                 caller: self()
+               )
+
+      assert AlertTree.utilization(tree) == 0.5
+    end
+
+    test "utilization/1 returns zero for unbounded trees" do
+      tree = start_supervised!({AlertTree, max_children: :infinity})
+
+      assert AlertTree.utilization(tree) == 0.0
+    end
+
     test "concurrent start_alert calls produce distinct children", %{pubsub: broker} do
       tree = start_supervised!({AlertTree, []})
       parent = self()
@@ -153,6 +200,48 @@ defmodule Pageless.Sup.AlertTreeTest do
       assert {:ok, _state} = GenServer.call(intake, :get_state)
 
       assert DynamicSupervisor.count_children(tree).active == 2
+    end
+
+    test "intake logs a warning and stays alive when the tree is at max_children", %{
+      pubsub: broker
+    } do
+      tree =
+        start_supervised!({AlertTree, max_children: 1},
+          id: {AlertTree, :overflow_intake_test}
+        )
+
+      intake =
+        start_supervised!({Pageless.Sup.AlertIntake, pubsub: broker, tree: tree},
+          id: {Pageless.Sup.AlertIntake, :overflow_intake_test}
+        )
+
+      {:ok, _state} = GenServer.call(intake, :get_state)
+
+      # Saturate the tree directly with the stub supervisor so no real Alert is started.
+      {:ok, _first_pid} =
+        AlertTree.start_alert(tree,
+          envelope: envelope(alert_id: "alert-overflow-first"),
+          pubsub: broker,
+          alert_supervisor: Pageless.Sup.AlertTreeTest.StubAlert,
+          caller: self()
+        )
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          Phoenix.PubSub.broadcast(
+            broker,
+            "alerts",
+            {:alert_received, envelope(alert_id: "alert-overflow-shed")}
+          )
+
+          # Serialize the intake mailbox so we know the message has been processed.
+          {:ok, _state} = GenServer.call(intake, :get_state)
+        end)
+
+      assert log =~ "alert tree at max_children"
+      assert log =~ "alert-overflow-shed"
+      assert Process.alive?(intake)
+      assert DynamicSupervisor.count_children(tree).active == 1
     end
 
     test "unknown messages do not crash intake", %{pubsub: broker} do

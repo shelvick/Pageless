@@ -19,6 +19,32 @@ defmodule Pageless.ApplicationBootTest do
     assert RulesAgent.get(rules_agent).__struct__ == Rules
   end
 
+  test "Application supervisor starts webhook guard singletons" do
+    children = Supervisor.which_children(Pageless.Supervisor)
+
+    assert {_id, rate_limiter, _type, _modules} =
+             Enum.find(children, fn
+               {Pageless.RateLimiter, _pid, _type, _modules} -> true
+               _child -> false
+             end)
+
+    assert {_id, webhook_dedup, _type, _modules} =
+             Enum.find(children, fn
+               {Pageless.WebhookDedup, _pid, _type, _modules} -> true
+               _child -> false
+             end)
+
+    assert {_id, gemini_budget, _type, _modules} =
+             Enum.find(children, fn
+               {Pageless.GeminiBudget, _pid, _type, _modules} -> true
+               _child -> false
+             end)
+
+    assert is_pid(rate_limiter)
+    assert is_pid(webhook_dedup)
+    assert is_pid(gemini_budget)
+  end
+
   test "rules child fails closed under supervisor when configured path is malformed" do
     Process.flag(:trap_exit, true)
 

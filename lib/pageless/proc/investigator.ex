@@ -10,7 +10,16 @@ defmodule Pageless.Proc.Investigator do
   alias Pageless.Config.Rules
   alias Pageless.Data.AgentState
   alias Pageless.Governance.ToolCall
+  alias Pageless.Proc.Investigator.Audit
+  alias Pageless.Proc.Investigator.Events
+  alias Pageless.Proc.Investigator.Gemini
+  alias Pageless.Proc.Investigator.JsonSafe
   alias Pageless.Proc.Investigator.Profile
+  alias Pageless.Proc.Investigator.ProfileScope
+  alias Pageless.Proc.Investigator.Prompt
+  alias Pageless.Proc.Investigator.ScopeGuard
+  alias Pageless.Proc.Investigator.ToolArgs
+  alias Pageless.Sup.Alert.State, as: AlertState
   alias Pageless.Svc.GeminiClient.Chunk
   alias Pageless.Svc.GeminiClient.FunctionCall
 
@@ -28,6 +37,8 @@ defmodule Pageless.Proc.Investigator do
     :gate_module,
     :gate_repo,
     :tool_dispatch,
+    :alert_state_pid,
+    :audit_agent_id,
     :tools,
     :active_ref,
     :prompt,
@@ -48,7 +59,8 @@ defmodule Pageless.Proc.Investigator do
           rules: Rules.t(),
           gate_module: module(),
           gate_repo: module(),
-          tool_dispatch: (ToolCall.t() -> {:ok, term()} | {:error, term()})
+          tool_dispatch: (ToolCall.t() -> {:ok, term()} | {:error, term()}),
+          alert_state_pid: pid() | nil
         ]
 
   @type t :: %__MODULE__{
@@ -65,6 +77,8 @@ defmodule Pageless.Proc.Investigator do
           gate_module: module(),
           gate_repo: module(),
           tool_dispatch: (ToolCall.t() -> {:ok, term()} | {:error, term()}),
+          alert_state_pid: pid() | nil,
+          audit_agent_id: Ecto.UUID.t(),
           tools: [map()],
           active_ref: reference() | nil,
           prompt: String.t() | nil,
@@ -88,6 +102,16 @@ defmodule Pageless.Proc.Investigator do
   @spec kick_off(GenServer.server()) :: :ok
   def kick_off(server), do: send(server, :run) |> then(fn _ -> :ok end)
 
+  @doc "Checks whether a profile permits a tool call before it reaches the gate."
+  @spec tool_call_in_profile_scope?(Profile.t(), atom(), term()) ::
+          :ok
+          | {:error, {:out_of_scope_tool, atom()}}
+          | {:error, {:verb_not_in_profile, String.t()}}
+          | {:error, {:table_not_in_profile_allowlist, String.t()}}
+  def tool_call_in_profile_scope?(%Profile{} = profile, tool, args) do
+    ProfileScope.allowed?(profile, tool, args)
+  end
+
   @impl true
   def init(opts) do
     profile = Keyword.fetch!(opts, :profile)
@@ -106,6 +130,8 @@ defmodule Pageless.Proc.Investigator do
       gate_module: Keyword.get(opts, :gate_module, Pageless.Governance.CapabilityGate),
       gate_repo: Keyword.get(opts, :gate_repo, Pageless.AuditTrail),
       tool_dispatch: Keyword.fetch!(opts, :tool_dispatch),
+      alert_state_pid: Keyword.get(opts, :alert_state_pid),
+      audit_agent_id: Ecto.UUID.generate(),
       tools: Profile.build_gemini_function_schema(profile, @tool_modules)
     }
 
@@ -118,8 +144,8 @@ defmodule Pageless.Proc.Investigator do
 
     state =
       state
-      |> append(:spawned, %{profile: state.profile.name, label: state.profile.label})
-      |> broadcast({:investigator_spawned, state.alert_id, state.profile.name, self()})
+      |> Events.append(:spawned, %{profile: state.profile.name, label: state.profile.label})
+      |> Events.broadcast({:investigator_spawned, state.alert_id, state.profile.name, self()})
 
     {:noreply, state}
   end
@@ -127,13 +153,15 @@ defmodule Pageless.Proc.Investigator do
   @impl true
   def handle_call(:get_state, {caller, _tag}, state) do
     maybe_allow_hammox(state.gemini_client, caller)
+    maybe_allow_hammox(state.gate_repo, caller)
     {:reply, {:ok, state}, state}
   end
 
   @impl true
   def handle_info(:run, state) do
     state
-    |> initial_prompt()
+    |> Map.put(:prompt, Gemini.render_prompt(state.profile, state.envelope))
+    |> Map.put(:current_text, "")
     |> start_turn()
   end
 
@@ -144,8 +172,8 @@ defmodule Pageless.Proc.Investigator do
     state =
       state
       |> append_text(text)
-      |> append(:reasoning_line, %{text: text})
-      |> broadcast({:reasoning_line, state.agent_id, text})
+      |> Events.append(:reasoning_line, %{text: text})
+      |> Events.broadcast({:reasoning_line, state.agent_id, state.alert_id, text})
 
     {:noreply, state}
   end
@@ -163,10 +191,10 @@ defmodule Pageless.Proc.Investigator do
 
   def handle_info({:gemini_error, ref, reason}, %{active_ref: ref} = state) do
     state
-    |> append(:tool_error, %{tool: "gemini.start_stream", reason: json_safe(reason)})
+    |> append(:tool_error, %{tool: "gemini.start_stream", reason: JsonSafe.convert(reason)})
     |> broadcast({:investigation_failed, state.alert_id, state.profile.name, :gemini_unavailable})
     |> notify_parent(%{status: :failed, reason: reason})
-    |> append(:final_state, %{outcome: :failed, reason: json_safe(reason)})
+    |> append(:final_state, %{outcome: :failed, reason: JsonSafe.convert(reason)})
     |> then(&{:stop, :normal, &1})
   end
 
@@ -176,29 +204,24 @@ defmodule Pageless.Proc.Investigator do
   def handle_info({:gate_result, _gate_id, _result}, state), do: {:noreply, state}
   def handle_info(_message, state), do: {:noreply, state}
 
-  @spec initial_prompt(t()) :: t()
-  defp initial_prompt(state) do
-    %{state | prompt: render_prompt(state), current_text: ""}
-  end
-
   @spec start_turn(t()) :: {:noreply, t()} | {:stop, :normal, t()}
   defp start_turn(%{steps: steps, profile: %{step_limit: limit}} = state) when steps >= limit do
     no_findings(state)
   end
 
   defp start_turn(state) do
-    case state.gemini_client.start_stream(gemini_opts(state)) do
+    case state.gemini_client.start_stream(Prompt.gemini_opts(state)) do
       {:ok, ref} ->
         {:noreply, %{state | active_ref: ref, current_text: "", steps: state.steps + 1}}
 
       {:error, reason} ->
         state
-        |> append(:tool_error, %{tool: "gemini.start_stream", reason: json_safe(reason)})
+        |> append(:tool_error, %{tool: "gemini.start_stream", reason: JsonSafe.convert(reason)})
         |> broadcast(
           {:investigation_failed, state.alert_id, state.profile.name, :gemini_unavailable}
         )
         |> notify_parent(%{status: :failed, reason: reason})
-        |> append(:final_state, %{outcome: :failed, reason: json_safe(reason)})
+        |> append(:final_state, %{outcome: :failed, reason: JsonSafe.convert(reason)})
         |> then(&{:stop, :normal, &1})
     end
   end
@@ -206,33 +229,21 @@ defmodule Pageless.Proc.Investigator do
   @spec handle_function_call(FunctionCall.t() | nil, t()) ::
           {:noreply, t()} | {:stop, :normal, t()}
   defp handle_function_call(%FunctionCall{name: name, args: args}, state) when is_map(args) do
-    tool = tool_atom(name)
+    case tool_atom(name) do
+      nil ->
+        handle_unknown_tool(name, args, state)
 
-    if tool && scoped?(state.profile, tool) do
-      call_args = tool_call_args(tool, args)
-      result = request_gate(state, tool, call_args)
-      class = classification(result)
+      tool ->
+        case ToolArgs.normalize(tool, args) do
+          {:ok, call_args} ->
+            case ProfileScope.allowed?(state.profile, tool, call_args) do
+              :ok -> handle_in_scope_tool_call(tool, args, call_args, state)
+              {:error, reason} -> handle_profile_violation(tool, args, call_args, reason, state)
+            end
 
-      state =
-        state
-        |> append(:tool_call, %{
-          tool: Atom.to_string(tool),
-          args: args,
-          result: json_safe(result_value(result)),
-          classification: class
-        })
-        |> broadcast({:tool_call, state.agent_id, tool, args, result_value(result), class})
-        |> continue_prompt(tool, result_value(result))
-
-      start_turn(state)
-    else
-      state =
-        state
-        |> append(:tool_hallucination, %{attempted_tool: name})
-        |> broadcast({:tool_hallucination, state.agent_id, name})
-        |> continue_prompt(:tool_hallucination, %{error: "tool #{name} is not available"})
-
-      start_turn(state)
+          {:error, reason} ->
+            handle_profile_violation(tool, args, {:malformed, args}, reason, state)
+        end
     end
   end
 
@@ -240,7 +251,7 @@ defmodule Pageless.Proc.Investigator do
 
   @spec complete_turn(t()) :: {:stop, :normal, t()}
   defp complete_turn(state) do
-    case decode_findings(state.current_text) do
+    case Gemini.decode_findings(state.current_text) do
       {:ok, findings} -> complete_success(state, findings)
       :error -> no_findings(state)
     end
@@ -250,10 +261,10 @@ defmodule Pageless.Proc.Investigator do
   defp complete_success(state, findings) do
     state =
       state
-      |> append(:findings, findings)
-      |> broadcast({:investigation_complete, state.alert_id, state.profile.name, findings})
-      |> notify_parent(findings)
-      |> append(:final_state, %{outcome: :complete})
+      |> Events.append(:findings, findings)
+      |> Events.broadcast({:investigation_complete, state.alert_id, state.profile.name, findings})
+      |> Events.notify_parent(findings)
+      |> Events.append(:final_state, %{outcome: :complete})
 
     {:stop, :normal, state}
   end
@@ -264,11 +275,87 @@ defmodule Pageless.Proc.Investigator do
 
     state =
       state
-      |> append(:findings, findings)
-      |> notify_parent(findings)
-      |> append(:final_state, %{outcome: :no_findings, reason: :step_limit})
+      |> Events.append(:findings, findings)
+      |> Events.notify_parent(findings)
+      |> Events.append(:final_state, %{outcome: :no_findings, reason: :step_limit})
 
     {:stop, :normal, state}
+  end
+
+  @spec handle_unknown_tool(String.t(), map(), t()) :: {:noreply, t()}
+  defp handle_unknown_tool(name, args, state) do
+    :ok = Audit.record_unknown_tool(state, name, args)
+
+    state =
+      state
+      |> Events.append(:tool_hallucination, %{attempted_tool: name})
+      |> Events.broadcast(
+        {:profile_violation, state.agent_id, :unknown, {:out_of_scope_tool, name}}
+      )
+
+    {:noreply, %{state | active_ref: nil}}
+  end
+
+  @spec handle_profile_violation(atom(), map(), term(), term(), t()) :: {:noreply, t()}
+  defp handle_profile_violation(tool, _raw_args, call_args, reason, state) do
+    :ok = Audit.record_terminal(state, tool, call_args, "profile_violation", inspect(reason))
+
+    state =
+      state
+      |> append(:tool_hallucination, %{
+        attempted_tool: Atom.to_string(tool),
+        reason: JsonSafe.convert(reason)
+      })
+      |> broadcast({:profile_violation, state.agent_id, tool, reason})
+
+    {:noreply, %{state | active_ref: nil}}
+  end
+
+  @spec handle_in_scope_tool_call(atom(), map(), term(), t()) ::
+          {:noreply, t()} | {:stop, :normal, t()}
+  defp handle_in_scope_tool_call(tool, raw_args, call_args, state) do
+    case claim_tool_budget(state) do
+      :ok ->
+        result = request_gate(state, tool, call_args)
+        class = ScopeGuard.classification(result)
+        result_value = ScopeGuard.result_value(result)
+
+        state =
+          state
+          |> Events.append(:tool_call, %{
+            tool: Atom.to_string(tool),
+            args: raw_args,
+            result: Events.json_safe(result_value),
+            classification: class
+          })
+          |> Events.broadcast(
+            {:tool_call, state.agent_id, state.alert_id, tool, raw_args, result_value, class}
+          )
+          |> continue_prompt(tool, result_value)
+
+        start_turn(state)
+
+      {:error, :budget_exhausted} ->
+        :ok =
+          Audit.record_terminal(state, tool, call_args, "budget_exhausted", ":budget_exhausted")
+
+        state =
+          state
+          |> Events.append(:tool_error, %{tool: Atom.to_string(tool), reason: "budget_exhausted"})
+          |> Events.broadcast({:budget_exhausted, state.agent_id, tool})
+          |> Events.append(:final_state, %{outcome: :budget_exhausted})
+
+        {:stop, :normal, state}
+    end
+  end
+
+  @spec claim_tool_budget(t()) :: :ok | {:error, :budget_exhausted}
+  defp claim_tool_budget(%{alert_state_pid: pid}) when is_pid(pid),
+    do: AlertState.inc_tool_call(pid)
+
+  defp claim_tool_budget(_state) do
+    Logger.warning("investigator missing alert_state_pid; failing closed before tool dispatch")
+    {:error, :budget_exhausted}
   end
 
   @spec request_gate(t(), atom(), term()) ::
@@ -277,7 +364,7 @@ defmodule Pageless.Proc.Investigator do
     tool_call = %ToolCall{
       tool: tool,
       args: args,
-      agent_id: state.agent_id,
+      agent_id: state.audit_agent_id,
       agent_pid_inspect: inspect(self()),
       alert_id: state.alert_id,
       request_id: request_id(),
@@ -293,33 +380,6 @@ defmodule Pageless.Proc.Investigator do
       repo: state.gate_repo,
       reply_to: self()
     )
-  end
-
-  @spec gemini_opts(t()) :: keyword()
-  defp gemini_opts(state) do
-    [
-      model: :pro,
-      temperature: 0.0,
-      tool_choice: :auto,
-      prompt: state.prompt,
-      tools: state.tools,
-      caller: self(),
-      metadata: %{alert_id: state.alert_id, agent_id: state.agent_id, profile: state.profile.name}
-    ]
-  end
-
-  @spec render_prompt(t()) :: String.t()
-  defp render_prompt(state) do
-    assigns = [
-      alert_id: state.envelope.alert_id,
-      service: state.envelope.service,
-      title: state.envelope.title,
-      severity: state.envelope.severity,
-      labels: state.envelope.labels,
-      annotations: state.envelope.annotations
-    ]
-
-    EEx.eval_string(state.profile.prompt_template, assigns: assigns)
   end
 
   @spec append_text(t(), String.t() | nil) :: t()
@@ -343,7 +403,7 @@ defmodule Pageless.Proc.Investigator do
       agent_type: :investigator,
       profile: Atom.to_string(state.profile.name),
       event_type: event_type,
-      payload: json_safe(payload),
+      payload: JsonSafe.convert(payload),
       sequence: state.sequence
     }
 
@@ -372,57 +432,12 @@ defmodule Pageless.Proc.Investigator do
     state
   end
 
-  @spec decode_findings(String.t()) :: {:ok, map()} | :error
-  defp decode_findings(text) do
-    with {:ok, decoded} <- Jason.decode(text),
-         true <- is_map(decoded) do
-      {:ok, atomize_known_keys(decoded)}
-    else
-      _other -> :error
-    end
-  end
-
-  @spec atomize_known_keys(map()) :: map()
-  defp atomize_known_keys(map) do
-    Map.new(map, fn
-      {"hypothesis", value} -> {:hypothesis, value}
-      {"confidence", value} -> {:confidence, value}
-      {"evidence", value} -> {:evidence, value}
-      {key, value} -> {key, value}
-    end)
-  end
-
   @spec tool_atom(String.t()) :: atom() | nil
   defp tool_atom("kubectl"), do: :kubectl
   defp tool_atom("prometheus_query"), do: :prometheus_query
   defp tool_atom("query_db"), do: :query_db
   defp tool_atom("mcp_runbook"), do: :mcp_runbook
   defp tool_atom(_name), do: nil
-
-  @spec scoped?(Profile.t(), atom()) :: boolean()
-  defp scoped?(profile, :kubectl), do: not is_nil(profile.tool_scope.kubectl)
-  defp scoped?(profile, :prometheus_query), do: profile.tool_scope.prometheus_query == true
-  defp scoped?(profile, :query_db), do: not is_nil(profile.tool_scope.query_db)
-  defp scoped?(profile, :mcp_runbook), do: profile.tool_scope.mcp_runbook == true
-  defp scoped?(_profile, _tool), do: false
-
-  @spec tool_call_args(atom(), map()) :: term()
-  defp tool_call_args(:kubectl, %{"args" => args}), do: args
-  defp tool_call_args(:prometheus_query, %{"promql" => promql}), do: promql
-  defp tool_call_args(:query_db, %{"sql" => sql}), do: sql
-  defp tool_call_args(:mcp_runbook, args), do: args
-  defp tool_call_args(_tool, args), do: args
-
-  @spec classification({:ok, term()} | {:gated, String.t()} | {:error, term()}) :: atom()
-  defp classification({:ok, %{classification: class}}), do: class
-  defp classification({:ok, _result}), do: :read
-  defp classification({:gated, _gate_id}), do: :write_prod_high
-  defp classification({:error, _reason}), do: :read
-
-  @spec result_value({:ok, term()} | {:gated, String.t()} | {:error, term()}) :: term()
-  defp result_value({:ok, result}), do: result
-  defp result_value({:gated, gate_id}), do: %{status: :gated, gate_id: gate_id}
-  defp result_value({:error, reason}), do: %{status: :error, reason: reason}
 
   @spec request_id() :: String.t()
   defp request_id, do: "investigator-req-#{System.unique_integer([:positive])}"
@@ -450,16 +465,4 @@ defmodule Pageless.Proc.Investigator do
       Logger.warning("failed to allow investigator sandbox access: #{inspect(error)}")
       :ok
   end
-
-  @spec json_safe(term()) :: term()
-  defp json_safe(value) when is_atom(value), do: Atom.to_string(value)
-
-  defp json_safe(value) when is_map(value),
-    do: Map.new(value, fn {key, val} -> {json_key(key), json_safe(val)} end)
-
-  defp json_safe(value) when is_list(value), do: Enum.map(value, &json_safe/1)
-  defp json_safe(value), do: value
-
-  defp json_key(key) when is_atom(key), do: Atom.to_string(key)
-  defp json_key(key), do: key
 end

@@ -8,7 +8,7 @@ kubectl_verbs:
   read:            [get, logs, describe, events, top]
   write_dev:       []
   write_prod_low:  [rollout restart, scale-up]
-  write_prod_high: [rollout undo, delete, scale-down, scale, apply, exec]
+  write_prod_high: [rollout undo, delete, scale-down, scale, apply]
 
 function_blocklist:
   - pg_terminate_backend

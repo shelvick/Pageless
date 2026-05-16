@@ -165,7 +165,7 @@ defmodule Pageless.Proc.Triager do
   defp record_classification(state, classification) do
     state
     |> append(:reasoning_line, %{text: classification.rationale})
-    |> broadcast({:triager_reasoning, state.agent_id, classification.rationale})
+    |> broadcast({:triager_reasoning, state.agent_id, state.alert_id, classification.rationale})
     |> append(:findings, %{
       class: classification.class,
       confidence: classification.confidence,

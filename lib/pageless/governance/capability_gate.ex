@@ -25,7 +25,7 @@ defmodule Pageless.Governance.CapabilityGate do
   @doc "Classifies and handles a tool call according to the supplied rules."
   @spec request(ToolCall.t(), Rules.t(), opts()) :: request_result()
   def request(%ToolCall{} = tool_call, %Rules{} = rules, opts) do
-    with {:ok, class, verb} <- classify(tool_call, rules),
+    with {:ok, class, verb} <- classify(tool_call, rules, opts),
          {:ok, policy} <- fetch_policy(rules, class, tool_call, opts) do
       record_and_continue(tool_call, class, verb, policy, opts, @gate_id_attempts)
     else
@@ -59,24 +59,27 @@ defmodule Pageless.Governance.CapabilityGate do
     end
   end
 
-  defp classify(%ToolCall{tool: :kubectl, args: args}, %Rules{} = rules) do
+  defp classify(%ToolCall{tool: :kubectl, args: args}, %Rules{} = rules, _opts) do
     case VerbTableClassifier.classify(args, rules.kubectl_verbs) do
       {:ok, class, verb} -> {:ok, class, verb}
       {:error, reason} -> {:rejected, :write_prod_high, reason}
     end
   end
 
-  defp classify(%ToolCall{tool: :query_db, args: sql}, %Rules{} = rules) do
-    case SqlSelectOnlyParser.validate(sql, function_blocklist: rules.function_blocklist) do
+  defp classify(%ToolCall{tool: :query_db, args: sql}, %Rules{} = rules, _opts) do
+    parser_opts = [function_blocklist: rules.function_blocklist]
+
+    case SqlSelectOnlyParser.validate(sql, parser_opts) do
       {:ok, :read} -> {:ok, :read, nil}
       {:error, reason} -> {:rejected, :read, reason}
     end
   end
 
-  defp classify(%ToolCall{tool: tool}, _rules) when tool in [:prometheus_query, :mcp_runbook],
-    do: {:ok, :read, nil}
+  defp classify(%ToolCall{tool: tool}, _rules, _opts)
+       when tool in [:prometheus_query, :mcp_runbook],
+       do: {:ok, :read, nil}
 
-  defp classify(%ToolCall{}, _rules), do: {:error, :unknown_tool}
+  defp classify(%ToolCall{}, _rules, _opts), do: {:error, :unknown_tool}
 
   defp fetch_policy(%Rules{} = rules, class, tool_call, opts) do
     case Map.fetch(rules.capability_classes, class) do

@@ -12,6 +12,15 @@ defmodule Pageless.Config.RulesTest do
     Path.expand("../../fixtures/pageless_rules/#{name}", __DIR__)
   end
 
+  defp temp_yaml!(contents) do
+    path =
+      Path.join(System.tmp_dir!(), "pageless-rules-#{System.unique_integer([:positive])}.yaml")
+
+    File.write!(path, contents)
+    on_exit(fn -> File.rm(path) end)
+    path
+  end
+
   defp valid_rules_map(overrides \\ %{}) do
     Map.merge(
       %{
@@ -25,7 +34,7 @@ defmodule Pageless.Config.RulesTest do
           "read" => ["get", "logs", "describe", "events", "top"],
           "write_dev" => [],
           "write_prod_low" => ["rollout restart", "scale-up"],
-          "write_prod_high" => ["rollout undo", "delete", "scale-down", "scale", "apply", "exec"]
+          "write_prod_high" => ["rollout undo", "delete", "scale-down", "scale", "apply"]
         },
         "function_blocklist" => ["pg_terminate_backend", "pg_cancel_backend"]
       },
@@ -208,7 +217,7 @@ defmodule Pageless.Config.RulesTest do
       end
     end
 
-    test "defaults absent routing, profile, kubectl, and query_db sections to empty maps" do
+    test "defaults absent optional sections to empty maps" do
       rules = Rules.validate!(valid_rules_map())
 
       assert rules.__struct__ == Rules
@@ -216,6 +225,74 @@ defmodule Pageless.Config.RulesTest do
       assert rules.alert_class_routing == %{}
       assert rules.kubectl_config == %{}
       assert rules.query_db_config == %{}
+      assert rules.rate_limiter_config == %{}
+    end
+
+    test "preserves rate limiter config from YAML with string keys" do
+      path =
+        temp_yaml!("""
+        capability_classes:
+          read: {auto: true, audit: false, gated: false}
+          write_dev: {auto: true, audit: true, gated: false}
+          write_prod_low: {auto: true, audit: true, gated: false}
+          write_prod_high: {auto: false, audit: true, gated: true}
+        kubectl_verbs:
+          read: [get]
+          write_dev: []
+          write_prod_low: [rollout restart]
+          write_prod_high: [rollout undo]
+        function_blocklist: []
+        rate_limiter:
+          arbitrary_route:
+            burst: not validated here
+            refill_per_sec: also not validated here
+        """)
+
+      rules = Rules.load!(path)
+
+      assert rules.rate_limiter_config == %{
+               "arbitrary_route" => %{
+                 "burst" => "not validated here",
+                 "refill_per_sec" => "also not validated here"
+               }
+             }
+    end
+
+    test "raises when rate limiter config is not a map" do
+      path =
+        temp_yaml!("""
+        capability_classes:
+          read: {auto: true, audit: false, gated: false}
+          write_dev: {auto: true, audit: true, gated: false}
+          write_prod_low: {auto: true, audit: true, gated: false}
+          write_prod_high: {auto: false, audit: true, gated: true}
+        kubectl_verbs:
+          read: [get]
+          write_dev: []
+          write_prod_low: [rollout restart]
+          write_prod_high: [rollout undo]
+        function_blocklist: []
+        rate_limiter: not a map
+        """)
+
+      assert_raise ArgumentError, ~r/rate_limiter_config must be a map/, fn ->
+        Rules.load!(path)
+      end
+    end
+
+    test "shipped pageless.yaml contains the WG-WebhookGuards-Pipeline route entries" do
+      path = Path.join(:code.priv_dir(:pageless), "pageless.yaml")
+      rules = Rules.load!(path)
+
+      assert rules.rate_limiter_config["webhook_alertmanager"] == %{
+               "burst" => 30,
+               "refill_per_sec" => 10
+             }
+
+      assert rules.rate_limiter_config["webhook_fire_test_alert"] == %{
+               "burst" => 3,
+               "refill_per_sec" => 0.0167
+             }
     end
 
     test "preserves present kubectl config map with string keys" do

@@ -15,7 +15,7 @@ defmodule Pageless.PayloadNormalizerTest do
       assert Ecto.UUID.cast(envelope.alert_id) == {:ok, envelope.alert_id}
       assert envelope.source == :alertmanager
       assert envelope.source_ref == payload["groupKey"]
-      assert envelope.fingerprint == "abc123paymentsdown"
+      assert envelope.fingerprint == "payments-api:PaymentsAPIDown:critical:_unknown"
       assert %DateTime{} = envelope.received_at
       assert envelope.started_at == ~U[2026-05-13 03:44:12Z]
       assert envelope.status == :firing
@@ -77,16 +77,61 @@ defmodule Pageless.PayloadNormalizerTest do
       assert {:error, {:malformed, :alerts}} = PayloadNormalizer.normalize_alertmanager(payload)
     end
 
-    test "computes deterministic fingerprints when Alertmanager omits the fingerprint" do
+    test "rejects Alertmanager batch above 50 alerts" do
+      payload = payload_with_alert_count(51)
+
+      assert {:error, {:too_many_alerts, 51}} = PayloadNormalizer.normalize_alertmanager(payload)
+    end
+
+    test "accepts Alertmanager batch of exactly 50 alerts" do
+      payload = payload_with_alert_count(50)
+
+      assert {:ok, envelopes} = PayloadNormalizer.normalize_alertmanager(payload)
+      assert length(envelopes) == 50
+    end
+
+    test "reports actual count for very large Alertmanager batch" do
+      payload = payload_with_alert_count(1_000)
+
+      assert {:error, {:too_many_alerts, 1_000}} =
+               PayloadNormalizer.normalize_alertmanager(payload)
+    end
+
+    test "always computes composite fingerprint, ignoring vendor-supplied value" do
       payload =
         fixture("alertmanager_v4_firing.json")
-        |> update_in(["alerts", Access.at(0)], &Map.delete(&1, "fingerprint"))
+        |> put_in(
+          ["alerts", Access.at(0), "fingerprint"],
+          "attacker-controlled-#{:rand.uniform()}"
+        )
+        |> put_in(["alerts", Access.at(0), "labels", "status"], "firing")
 
       assert {:ok, [first]} = PayloadNormalizer.normalize_alertmanager(payload)
       assert {:ok, [second]} = PayloadNormalizer.normalize_alertmanager(payload)
-      assert is_binary(first.fingerprint)
-      assert byte_size(first.fingerprint) == 16
+      assert first.fingerprint == "payments-api:PaymentsAPIDown:critical:firing"
       assert first.fingerprint == second.fingerprint
+    end
+
+    test "composite fingerprints ignore noisy labels and fill unknown placeholders" do
+      noisy =
+        fixture("alertmanager_v4_firing.json")
+        |> update_in(["alerts", Access.at(0)], &Map.delete(&1, "fingerprint"))
+
+      baseline = put_in(noisy, ["alerts", Access.at(0), "labels", "instance"], "pod-a")
+      varied = put_in(noisy, ["alerts", Access.at(0), "labels", "instance"], "pod-b")
+
+      assert {:ok, [baseline_envelope]} = PayloadNormalizer.normalize_alertmanager(baseline)
+      assert {:ok, [varied_envelope]} = PayloadNormalizer.normalize_alertmanager(varied)
+      assert baseline_envelope.fingerprint == varied_envelope.fingerprint
+
+      unknown =
+        noisy
+        |> update_in(["alerts", Access.at(0), "labels"], fn labels ->
+          Map.drop(labels, ["service", "alertname", "severity", "status"])
+        end)
+
+      assert {:ok, [unknown_envelope]} = PayloadNormalizer.normalize_alertmanager(unknown)
+      assert unknown_envelope.fingerprint == "_unknown:_unknown:_unknown:_unknown"
     end
 
     test "treats unparseable startsAt as nil without failing the alert" do
@@ -219,6 +264,20 @@ defmodule Pageless.PayloadNormalizerTest do
     payload = put_in(base, ["alerts", Access.at(0), "labels", "severity"], value)
     assert {:ok, [envelope]} = PayloadNormalizer.normalize_alertmanager(payload)
     assert envelope.severity == expected
+  end
+
+  defp payload_with_alert_count(count) do
+    base = fixture("alertmanager_v4_firing.json")
+    [alert] = base["alerts"]
+
+    alerts =
+      Enum.map(1..count, fn index ->
+        alert
+        |> put_in(["fingerprint"], "batch-fingerprint-#{index}")
+        |> put_in(["labels", "instance"], "payments-api-#{index}")
+      end)
+
+    Map.put(base, "alerts", alerts)
   end
 
   defp fixture(name) do

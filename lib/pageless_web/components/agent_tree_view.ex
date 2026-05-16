@@ -26,10 +26,13 @@ defmodule PagelessWeb.Components.AgentTreeView do
   @doc "Applies parent assigns or a forwarded agent event to the tree state."
   @spec update(map(), Phoenix.LiveView.Socket.t()) :: {:ok, Phoenix.LiveView.Socket.t()}
   def update(assigns, socket) do
+    previous_alert_id = socket.assigns[:alert_id]
+    alert_changed? = Map.has_key?(assigns, :alert_id) and assigns.alert_id != previous_alert_id
+
     socket = assign(socket, Map.drop(assigns, [:event]))
 
     socket =
-      if Map.has_key?(assigns, :alert_id) and assigns.alert_id != socket.assigns[:alert_id] do
+      if alert_changed? do
         assign(socket, topology: empty_topology(), node_data: %{})
       else
         socket
@@ -87,6 +90,10 @@ defmodule PagelessWeb.Components.AgentTreeView do
     |> to_tuple()
   end
 
+  def event_to_node_mutation({:reasoning_line, agent_id, _alert_id, line}, state) do
+    event_to_node_mutation({:reasoning_line, agent_id, line}, state)
+  end
+
   def event_to_node_mutation({:reasoning_line, agent_id, line}, state) do
     state
     |> update_existing_node(agent_id, fn data ->
@@ -95,16 +102,35 @@ defmodule PagelessWeb.Components.AgentTreeView do
     |> to_tuple()
   end
 
+  def event_to_node_mutation({:triager_reasoning, agent_id, _alert_id, line}, state) do
+    event_to_node_mutation({:triager_reasoning, agent_id, line}, state)
+  end
+
   def event_to_node_mutation({:triager_reasoning, agent_id, line}, state) do
     event_to_node_mutation({:reasoning_line, agent_id, line}, state)
+  end
+
+  def event_to_node_mutation({:remediator_reasoning, agent_id, _alert_id, line}, state) do
+    event_to_node_mutation({:remediator_reasoning, agent_id, line}, state)
   end
 
   def event_to_node_mutation({:remediator_reasoning, agent_id, line}, state) do
     event_to_node_mutation({:reasoning_line, agent_id, line}, state)
   end
 
+  def event_to_node_mutation({:escalator_reasoning, agent_id, _alert_id, line}, state) do
+    event_to_node_mutation({:escalator_reasoning, agent_id, line}, state)
+  end
+
   def event_to_node_mutation({:escalator_reasoning, agent_id, line}, state) do
     event_to_node_mutation({:reasoning_line, agent_id, line}, state)
+  end
+
+  def event_to_node_mutation(
+        {:tool_call, agent_id, _alert_id, tool, args, result, classification},
+        state
+      ) do
+    event_to_node_mutation({:tool_call, agent_id, tool, args, result, classification}, state)
   end
 
   def event_to_node_mutation({:tool_call, agent_id, tool, args, result, classification}, state) do
@@ -198,6 +224,68 @@ defmodule PagelessWeb.Components.AgentTreeView do
       data
       |> Map.put(:status, :done)
       |> Map.update(:payload, %{page_out: page_payload}, &Map.put(&1, :page_out, page_payload))
+    end)
+    |> to_tuple()
+  end
+
+  def event_to_node_mutation({:triager_classified, agent_id, _alert_id, classification}, state)
+      when is_map(classification) do
+    state
+    |> update_existing_node(agent_id, fn data ->
+      data
+      |> Map.put(:status, :tool_active)
+      |> Map.update(:payload, classification, &Map.merge(&1, classification))
+    end)
+    |> to_tuple()
+  end
+
+  def event_to_node_mutation({:triager_failed, agent_id, _alert_id, reason}, state) do
+    state
+    |> update_existing_node(agent_id, fn data ->
+      data
+      |> Map.put(:status, :done)
+      |> Map.update(:payload, %{failed: reason}, &Map.put(&1, :failed, reason))
+    end)
+    |> to_tuple()
+  end
+
+  def event_to_node_mutation({:tool_hallucination, agent_id, attempted_tool}, state) do
+    line = "Hallucinated tool: #{attempted_tool}"
+
+    state
+    |> update_existing_node(agent_id, fn data ->
+      Map.update(data, :reasoning, [line], fn lines -> trim_reasoning(lines ++ [line]) end)
+    end)
+    |> to_tuple()
+  end
+
+  def event_to_node_mutation({:investigation_complete, _alert_id, profile, findings}, state)
+      when is_map(findings) do
+    state
+    |> update_existing_node(investigator_agent_id(profile), fn data ->
+      data
+      |> Map.put(:status, :done)
+      |> Map.update(:payload, %{findings: findings}, &Map.put(&1, :findings, findings))
+    end)
+    |> to_tuple()
+  end
+
+  def event_to_node_mutation({:investigation_failed, _alert_id, profile, reason}, state) do
+    state
+    |> update_existing_node(investigator_agent_id(profile), fn data ->
+      data
+      |> Map.put(:status, :done)
+      |> Map.update(:payload, %{failed: reason}, &Map.put(&1, :failed, reason))
+    end)
+    |> to_tuple()
+  end
+
+  def event_to_node_mutation({:page_out_failed, agent_id, _alert_id, reason}, state) do
+    state
+    |> update_existing_node(agent_id, fn data ->
+      data
+      |> Map.put(:status, :done)
+      |> Map.update(:payload, %{failed: reason}, &Map.put(&1, :failed, reason))
     end)
     |> to_tuple()
   end

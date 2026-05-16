@@ -26,6 +26,11 @@ defmodule Pageless.Application do
         },
         {Pageless.Conductor.DemoConductor, pubsub: Pageless.PubSub},
         {Task.Supervisor, name: Pageless.TaskSupervisor},
+        {Pageless.RateLimiter, name: Pageless.RateLimiter, routes: rate_limiter_routes()},
+        {Pageless.WebhookDedup,
+         name: Pageless.WebhookDedup,
+         window_ms: Application.get_env(:pageless, :webhook_dedup_window_ms, 60_000)},
+        {Pageless.GeminiBudget, name: Pageless.GeminiBudget},
         PagelessWeb.Endpoint
       ]
       |> append_mcp_filesystem(Application.get_env(:pageless, :mcp_filesystem, :disabled))
@@ -58,6 +63,12 @@ defmodule Pageless.Application do
   defp rules_path do
     Application.get_env(:pageless, :rules_path) ||
       Path.join(:code.priv_dir(:pageless), "pageless.yaml")
+  end
+
+  defp rate_limiter_routes do
+    rules_path()
+    |> Pageless.Config.Rules.load!()
+    |> Map.fetch!(:rate_limiter_config)
   end
 
   @impl true

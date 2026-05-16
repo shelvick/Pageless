@@ -178,8 +178,30 @@ defmodule PagelessWeb.Components.ApprovalModal do
   defp reasoning_summary(%{"summary" => summary}) when is_binary(summary), do: summary
   defp reasoning_summary(_context), do: "No reasoning summary provided."
 
+  @evidence_link_schemes ~w(https http mailto)
+
+  @doc """
+  Returns a safe URL string for the evidence link in a reasoning context,
+  or `nil` if the link is missing or fails the scheme allowlist.
+
+  Allowed schemes: #{Enum.join(@evidence_link_schemes, ", ")}. Anything else
+  (including internal `agent_state:findings:N` references) returns `nil` so
+  the modal renders the summary text without an anchor. URLs carrying
+  embedded credentials (userinfo) are also rejected.
+  """
   @spec evidence_link(map()) :: String.t() | nil
-  defp evidence_link(%{evidence_link: link}) when is_binary(link), do: link
-  defp evidence_link(%{"evidence_link" => link}) when is_binary(link), do: link
-  defp evidence_link(_context), do: nil
+  def evidence_link(%{evidence_link: link}) when is_binary(link),
+    do: validate_evidence_link(link)
+
+  def evidence_link(%{"evidence_link" => link}) when is_binary(link),
+    do: validate_evidence_link(link)
+
+  def evidence_link(_context), do: nil
+
+  defp validate_evidence_link(link) do
+    case URI.parse(link) do
+      %URI{scheme: scheme, userinfo: nil} when scheme in @evidence_link_schemes -> link
+      _other -> nil
+    end
+  end
 end

@@ -10,12 +10,12 @@ defmodule Pageless.Proc.Remediator do
   alias Pageless.Config.Rules
   alias Pageless.Data.AgentState
   alias Pageless.Governance.ToolCall
+  alias Pageless.Proc.Remediator.Gemini
+  alias Pageless.Proc.Remediator.Prompt
+  alias Pageless.Proc.Remediator.Proposal
   alias Pageless.Sup.Alert
   alias Pageless.Svc.GeminiClient.FunctionCall
   alias Pageless.Svc.GeminiClient.Response
-
-  @valid_actions ~w(rollout_undo rollout_restart scale_down delete apply exec other)a
-  @valid_classes ~w(read write_dev write_prod_low write_prod_high)a
 
   defstruct [
     :agent_id,
@@ -38,14 +38,7 @@ defmodule Pageless.Proc.Remediator do
     sequence: 0
   ]
 
-  @type proposal :: %{
-          action: atom(),
-          args: [String.t()],
-          classification_hint: atom(),
-          rationale: String.t(),
-          considered_alternatives: [map()],
-          request_id: String.t()
-        }
+  @type proposal :: Proposal.t()
 
   @type outcome ::
           :auto_fired
@@ -70,7 +63,7 @@ defmodule Pageless.Proc.Remediator do
           gate_repo: module(),
           escalator_module: module(),
           tool_dispatch: (ToolCall.t() -> {:ok, term()} | {:error, term()}),
-          proposal: proposal() | nil,
+          proposal: Proposal.t() | nil,
           gate_id: String.t() | nil,
           sequence: non_neg_integer()
         }
@@ -130,8 +123,8 @@ defmodule Pageless.Proc.Remediator do
     state =
       state
       |> append(:spawned, %{
-        envelope_summary: envelope_summary(state.envelope),
-        findings_summary: findings_summary(state.findings)
+        envelope_summary: Prompt.envelope_summary(state.envelope),
+        findings_summary: Prompt.findings_summary(state.findings)
       })
       |> broadcast({:remediator_spawned, state.agent_id, state.alert_id})
 
@@ -167,11 +160,11 @@ defmodule Pageless.Proc.Remediator do
 
   def handle_info(_message, state), do: {:noreply, state}
 
-  @spec propose_action(t()) :: {:ok, proposal()} | {:error, term()}
+  @spec propose_action(t()) :: {:ok, Proposal.t()} | {:error, term()}
   defp propose_action(state) do
-    case state.gemini_client.generate(gemini_opts(state)) do
+    case state.gemini_client.generate(Gemini.opts(state.envelope, state.findings)) do
       {:ok, %Response{function_calls: [%FunctionCall{name: "propose_action", args: args} | _]}} ->
-        build_proposal(args)
+        Proposal.build(args)
 
       {:ok, %Response{function_calls: []}} ->
         {:error, :no_function_call}
@@ -181,17 +174,17 @@ defmodule Pageless.Proc.Remediator do
     end
   end
 
-  @spec continue_from_proposal({:ok, proposal()} | {:error, term()}, t()) ::
+  @spec continue_from_proposal({:ok, Proposal.t()} | {:error, term()}, t()) ::
           {:noreply, t()} | {:stop, :normal, t()}
   defp continue_from_proposal({:ok, proposal}, state) do
     state =
       state
       |> append(:reasoning_line, %{text: proposal.rationale})
-      |> broadcast({:remediator_reasoning, state.agent_id, proposal.rationale})
-      |> append(:findings, proposal_payload(proposal))
+      |> broadcast({:remediator_reasoning, state.agent_id, state.alert_id, proposal.rationale})
+      |> append(:findings, Proposal.payload(proposal))
 
     state = %{state | proposal: proposal}
-    tool_call = tool_call(state, proposal)
+    tool_call = Proposal.tool_call(proposal, state.alert_id, inspect(self()), state.findings)
 
     case request_gate(state, tool_call) do
       {:ok, result} ->
@@ -279,7 +272,7 @@ defmodule Pageless.Proc.Remediator do
       :remediator_action_proposed,
       state.agent_id,
       state.alert_id,
-      proposal_payload(state.proposal)
+      Proposal.payload(state.proposal)
       |> Map.merge(%{gate_id: gate_id, classification: nil})
     })
   end
@@ -353,90 +346,6 @@ defmodule Pageless.Proc.Remediator do
     {:stop, :normal, state}
   end
 
-  @spec build_proposal(map()) :: {:ok, proposal()} | {:error, atom()}
-  defp build_proposal(args) when is_map(args) do
-    with {:ok, argv} <- argv_arg(args),
-         {:ok, alternatives} <- alternatives_arg(args) do
-      {:ok,
-       %{
-         action: action_atom(get_arg(args, "action", :action)),
-         args: argv,
-         classification_hint:
-           class_atom(get_arg(args, "classification_hint", :classification_hint)),
-         rationale: non_empty(get_arg(args, "rationale", :rationale), "No rationale provided."),
-         considered_alternatives: alternatives,
-         request_id: request_id()
-       }}
-    end
-  end
-
-  defp build_proposal(_args), do: {:error, :invalid_proposal}
-
-  @spec argv_arg(map()) :: {:ok, [String.t()]} | {:error, :invalid_args}
-  defp argv_arg(args) do
-    case get_arg(args, "args", :args) do
-      argv when is_list(argv) ->
-        if Enum.all?(argv, &is_binary/1) and argv != [] do
-          {:ok, argv}
-        else
-          {:error, :invalid_args}
-        end
-
-      _other ->
-        {:error, :invalid_args}
-    end
-  end
-
-  @spec alternatives_arg(map()) :: {:ok, [map()]} | {:error, :invalid_considered_alternatives}
-  defp alternatives_arg(args) do
-    alternatives = get_arg(args, "considered_alternatives", :considered_alternatives)
-
-    if is_list(alternatives) and alternatives != [] and
-         Enum.all?(alternatives, &valid_alternative?/1) do
-      {:ok, alternatives}
-    else
-      {:error, :invalid_considered_alternatives}
-    end
-  end
-
-  @spec valid_alternative?(term()) :: boolean()
-  defp valid_alternative?(%{} = alternative) do
-    is_binary(get_arg(alternative, "action", :action)) and
-      is_binary(get_arg(alternative, "reason_rejected", :reason_rejected))
-  end
-
-  defp valid_alternative?(_alternative), do: false
-
-  @spec tool_call(t(), proposal()) :: ToolCall.t()
-  defp tool_call(state, proposal) do
-    %ToolCall{
-      tool: :kubectl,
-      args: proposal.args,
-      agent_id: gate_agent_id(),
-      agent_pid_inspect: inspect(self()),
-      alert_id: state.alert_id,
-      request_id: proposal.request_id,
-      reasoning_context: %{
-        summary: proposal.rationale,
-        evidence_link: findings_link(state.findings)
-      }
-    }
-  end
-
-  @spec gate_agent_id() :: Ecto.UUID.t()
-  defp gate_agent_id, do: Ecto.UUID.generate()
-
-  @spec proposal_payload(proposal()) :: map()
-  defp proposal_payload(proposal) do
-    %{
-      action: proposal.action,
-      args: proposal.args,
-      classification_hint: proposal.classification_hint,
-      rationale: proposal.rationale,
-      considered_alternatives: proposal.considered_alternatives
-    }
-  end
-
   @spec append(t(), AgentState.event_type(), map()) :: t()
   defp append(state, event_type, payload) do
     attrs = %{
@@ -498,149 +407,6 @@ defmodule Pageless.Proc.Remediator do
       Logger.warning("failed to allow remediator sandbox access: #{inspect(error)}")
       :ok
   end
-
-  @spec gemini_opts(t()) :: keyword()
-  defp gemini_opts(state) do
-    [
-      model: :pro,
-      temperature: 0.0,
-      tool_choice: {:specific, "propose_action"},
-      prompt: inspect(%{envelope: envelope_summary(state.envelope), findings: state.findings}),
-      system_instruction: system_instruction(),
-      tools: [propose_action_tool()]
-    ]
-  end
-
-  @spec system_instruction() :: String.t()
-  defp system_instruction do
-    """
-    You are an incident remediator. You receive an alert and structured investigator findings,
-    and you propose ONE concrete kubectl action to remediate.
-
-    Reasoning protocol (FOLLOW EXACTLY):
-      1. Identify the cheapest reversible action that could plausibly remediate
-         (e.g., kubectl rollout restart). Add it to considered_alternatives with
-         a one-sentence reason it MIGHT work.
-      2. Critique that action against the findings -- does it address the root cause?
-         If the findings indicate the deployed code itself is bad, restart loops
-         back into the same broken code. Add the rejection reason to that
-         considered_alternatives entry.
-      3. Propose the action that DOES address the root cause (e.g., kubectl
-         rollout undo). This is your final proposal.
-
-    You MUST emit exactly one function call to propose_action with at least
-    one entry in considered_alternatives. The propose_action.args field must
-    be a complete kubectl argv array starting with the verb (no leading "kubectl").
-    """
-  end
-
-  @spec propose_action_tool() :: map()
-  defp propose_action_tool do
-    %{
-      function_declarations: [
-        %{
-          name: "propose_action",
-          parameters: %{
-            type: "object",
-            required: [
-              "action",
-              "args",
-              "classification_hint",
-              "rationale",
-              "considered_alternatives"
-            ],
-            properties: %{
-              action: %{type: "string"},
-              args: %{type: "array", items: %{type: "string"}, minItems: 1},
-              classification_hint: %{
-                type: "string",
-                enum: Enum.map(@valid_classes, &Atom.to_string/1)
-              },
-              rationale: %{type: "string"},
-              considered_alternatives: %{
-                type: "array",
-                minItems: 1,
-                items: %{
-                  type: "object",
-                  required: ["action", "reason_rejected"],
-                  properties: %{
-                    action: %{type: "string"},
-                    reason_rejected: %{type: "string"}
-                  }
-                }
-              }
-            }
-          }
-        }
-      ]
-    }
-  end
-
-  @spec action_atom(term()) :: atom()
-  defp action_atom(value) when is_atom(value) and value in @valid_actions, do: value
-
-  defp action_atom(value) when is_binary(value) do
-    Enum.find(@valid_actions, :other, &(Atom.to_string(&1) == value))
-  end
-
-  defp action_atom(_value), do: :other
-
-  @spec class_atom(term()) :: atom()
-  defp class_atom(value) when is_atom(value) and value in @valid_classes, do: value
-
-  defp class_atom(value) when is_binary(value) do
-    Enum.find(@valid_classes, :write_prod_high, &(Atom.to_string(&1) == value))
-  end
-
-  defp class_atom(_value), do: :write_prod_high
-
-  @spec get_arg(map(), String.t(), atom()) :: term()
-  defp get_arg(args, string_key, atom_key) do
-    Map.get(args, string_key) || Map.get(args, atom_key)
-  end
-
-  @spec request_id() :: String.t()
-  defp request_id do
-    "rem_req_" <> (:crypto.strong_rand_bytes(8) |> Base.encode16(case: :lower))
-  end
-
-  @spec envelope_summary(AlertEnvelope.t()) :: map()
-  defp envelope_summary(envelope) do
-    %{
-      alert_id: envelope.alert_id,
-      source: envelope.source,
-      severity: envelope.severity,
-      alert_class: envelope.alert_class,
-      title: envelope.title,
-      service: envelope.service,
-      fingerprint: envelope.fingerprint,
-      started_at: envelope.started_at,
-      labels: envelope.labels
-    }
-  end
-
-  @spec findings_summary([map()]) :: map()
-  defp findings_summary(findings) do
-    %{
-      count: length(findings),
-      hypothesis: findings |> List.first() |> hypothesis()
-    }
-  end
-
-  @spec hypothesis(map() | nil) :: String.t() | nil
-  defp hypothesis(%{} = finding),
-    do: Map.get(finding, :hypothesis) || Map.get(finding, "hypothesis")
-
-  defp hypothesis(_finding), do: nil
-
-  @spec findings_link([map()]) :: String.t() | nil
-  defp findings_link([]), do: nil
-  defp findings_link(findings), do: "agent_state:findings:#{length(findings)}"
-
-  @spec non_empty(term(), String.t()) :: String.t()
-  defp non_empty(value, fallback) when value in [nil, ""], do: fallback
-  defp non_empty(value, _fallback) when is_binary(value), do: value
-  defp non_empty(_value, fallback), do: fallback
 
   @spec json_safe(term()) :: term()
   defp json_safe(%DateTime{} = value), do: DateTime.to_iso8601(value)

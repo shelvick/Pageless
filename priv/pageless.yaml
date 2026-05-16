@@ -8,7 +8,7 @@ kubectl_verbs:
   read: [get, logs, describe, events, top]
   write_dev: []
   write_prod_low: [rollout restart, scale-up]
-  write_prod_high: [rollout undo, delete, scale-down, scale, apply, exec]
+  write_prod_high: [rollout undo, delete, scale-down, scale, apply]
 
 function_blocklist:
   - pg_terminate_backend
@@ -91,3 +91,17 @@ investigator_profiles:
     reasoning_visibility: stream
 alert_class_routing: {}
 query_db: {}
+
+rate_limiter:
+  default:
+    burst: 20
+    refill_per_sec: 5
+  webhook_alertmanager:
+    burst: 30
+    refill_per_sec: 10
+  webhook_pagerduty:
+    burst: 50
+    refill_per_sec: 10
+  webhook_fire_test_alert:
+    burst: 3
+    refill_per_sec: 0.0167

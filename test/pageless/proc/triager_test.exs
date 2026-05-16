@@ -99,7 +99,8 @@ defmodule Pageless.Proc.TriagerTest do
       :ok = Triager.kick_off(pid)
       monitor_ref = Process.monitor(pid)
 
-      assert_receive {:triager_reasoning, ^agent_id, "Deploy at 03:43:58; errors at 03:44:12."}
+      assert_receive {:triager_reasoning, ^agent_id, "alert-triager",
+                      "Deploy at 03:43:58; errors at 03:44:12."}
 
       assert_receive {:triager_classified, ^agent_id, "alert-triager", classified}
       assert classified.class == :service_down_with_recent_deploy
@@ -174,12 +175,12 @@ defmodule Pageless.Proc.TriagerTest do
       :ok = Triager.kick_off(pid)
       monitor_ref = Process.monitor(pid)
 
-      assert_receive {:triager_classified, ^agent_id, "alert-triager", classified}
+      assert_receive {:triager_classified, ^agent_id, "alert-triager", classified}, 1_000
       assert classified.class == :latency_creep
       assert classified.topology == :chain
       assert classified.profiles == [:metrics, :db_load, :pool_state]
 
-      assert_receive {:triager_dispatched, ^agent_id, "alert-triager", dispatched}
+      assert_receive {:triager_dispatched, ^agent_id, "alert-triager", dispatched}, 1_000
       assert Enum.map(dispatched, & &1.profile) == [:metrics, :db_load, :pool_state]
       assert Enum.map(dispatched, & &1.chain_position) == [1, 2, 3]
 
@@ -270,7 +271,7 @@ defmodule Pageless.Proc.TriagerTest do
       :ok = Triager.kick_off(pid)
       monitor_ref = Process.monitor(pid)
 
-      assert_receive {:triager_reasoning, ^agent_id, rationale}
+      assert_receive {:triager_reasoning, ^agent_id, "alert-triager", rationale}
       assert rationale =~ "fallback"
       assert_receive {:triager_classified, ^agent_id, "alert-triager", %{class: :unknown}}
       assert_receive {:triager_dispatched, ^agent_id, "alert-triager", [dispatched]}

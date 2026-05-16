@@ -10,10 +10,10 @@ defmodule Pageless.AuditTrail.Decision do
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
-  @tools ~w(kubectl prometheus_query query_db mcp_runbook)
+  @tools ~w(kubectl prometheus_query query_db mcp_runbook unknown)
   @classifications ~w(read write_dev write_prod_low write_prod_high)
-  @decisions ~w(execute audit_and_execute gated approved denied executed execution_failed rejected)
-  @initial_decisions ~w(execute audit_and_execute gated rejected)
+  @decisions ~w(execute audit_and_execute gated approved denied executed execution_failed rejected profile_violation budget_exhausted)
+  @initial_decisions ~w(execute audit_and_execute gated rejected profile_violation budget_exhausted)
   @result_statuses ~w(ok error)
   @create_required ~w(request_id alert_id agent_id tool args classification decision)a
   @fields @create_required ++
@@ -68,6 +68,7 @@ defmodule Pageless.AuditTrail.Decision do
     |> validate_inclusion(:classification, @classifications)
     |> validate_inclusion(:decision, @decisions)
     |> validate_args_map()
+    |> validate_unknown_tool()
     |> validate_transition(decision.decision)
     |> validate_decision_requirements()
     |> unique_constraint(:gate_id, name: :audit_trail_decisions_gate_id_unique_index)
@@ -77,6 +78,23 @@ defmodule Pageless.AuditTrail.Decision do
     case get_field(changeset, :args) do
       value when is_map(value) -> changeset
       _value -> add_error(changeset, :args, "must be a map")
+    end
+  end
+
+  defp validate_unknown_tool(changeset) do
+    case {get_field(changeset, :tool), get_field(changeset, :decision),
+          get_field(changeset, :args)} do
+      {"unknown", "profile_violation", %{"function_name" => _, "raw_args" => _}} ->
+        changeset
+
+      {"unknown", "profile_violation", _args} ->
+        add_error(changeset, :args, "must include function_name and raw_args")
+
+      {"unknown", _decision, _args} ->
+        add_error(changeset, :tool, "is only valid for profile_violation")
+
+      _known_tool ->
+        changeset
     end
   end
 
@@ -116,8 +134,42 @@ defmodule Pageless.AuditTrail.Decision do
         |> validate_required([:result_status, :result_summary])
         |> validate_inclusion(:result_status, @result_statuses)
 
+      "profile_violation" ->
+        validate_pregate_terminal(changeset)
+
+      "budget_exhausted" ->
+        changeset
+        |> validate_pregate_terminal()
+        |> validate_change(:result_summary, fn
+          :result_summary, ":budget_exhausted" -> []
+          :result_summary, _value -> [result_summary: "must be :budget_exhausted"]
+        end)
+
       _decision ->
         changeset
+    end
+  end
+
+  defp validate_pregate_terminal(changeset) do
+    changeset
+    |> validate_required([:result_status, :result_summary])
+    |> validate_change(:result_status, fn
+      :result_status, "error" -> []
+      :result_status, _value -> [result_status: "must be error"]
+    end)
+    |> validate_change(:result_summary, fn
+      :result_summary, value when is_binary(value) and value != "" -> []
+      :result_summary, _value -> [result_summary: "can't be blank"]
+    end)
+    |> validate_absent(:gate_id)
+    |> validate_absent(:operator_ref)
+    |> validate_absent(:denial_reason)
+  end
+
+  defp validate_absent(changeset, field) do
+    case get_field(changeset, field) do
+      nil -> changeset
+      _value -> add_error(changeset, field, "must be blank")
     end
   end
 

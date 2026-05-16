@@ -12,6 +12,8 @@ defmodule Pageless.Tools.MCPRunbook.Behaviour do
 
   @type error_reason ::
           :invalid_args
+          | :tool_not_allowed
+          | :path_escape
           | :mcp_domain_error
           | {:mcp_error, term(), String.t()}
           | :mcp_unexpected

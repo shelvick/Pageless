@@ -7,7 +7,7 @@ defmodule Pageless.Tools.QueryDB do
   alias Pageless.Governance.ToolCall
   alias Pageless.Tools.QueryDB.Behaviour
 
-  @default_statement_timeout_ms 5_000
+  @default_statement_timeout_ms 1_500
   @default_max_rows 1_000
 
   @doc "Executes a query_db tool call with application defaults."
@@ -57,7 +57,8 @@ defmodule Pageless.Tools.QueryDB do
 
   defp validate_sql(sql, opts) do
     case SqlSelectOnlyParser.validate(sql,
-           function_blocklist: Keyword.get(opts, :function_blocklist, [])
+           function_blocklist: Keyword.get(opts, :function_blocklist, []),
+           allowed_tables: Keyword.get(opts, :allowed_tables, :all)
          ) do
       {:ok, :read} -> :ok
       {:error, reason} -> {:error, {:sql_blocked, reason}}
@@ -73,7 +74,7 @@ defmodule Pageless.Tools.QueryDB do
     max_rows = positive_integer_opt(opts, :max_rows, @default_max_rows)
     start_ms = System.monotonic_time(:millisecond)
 
-    case repo.transaction(fn -> run_query(repo, sql, statement_timeout_ms) end,
+    case repo.transaction(fn -> run_query(repo, sql, statement_timeout_ms, max_rows) end,
            timeout: statement_timeout_ms + 1_000
          ) do
       {:ok, result} -> {:ok, ok_result(result, sql, max_rows, start_ms)}
@@ -82,14 +83,21 @@ defmodule Pageless.Tools.QueryDB do
     end
   end
 
-  defp run_query(repo, sql, statement_timeout_ms) do
+  defp run_query(repo, sql, statement_timeout_ms, max_rows) do
     repo.query!("SET LOCAL transaction_read_only = on", [])
     repo.query!("SET LOCAL statement_timeout = '#{statement_timeout_ms}ms'", [])
 
-    case repo.query(sql, []) do
+    case repo.query(wrapped_sql(sql), [max_rows + 1]) do
       {:ok, result} -> result
       {:error, error} -> repo.rollback({:query_error, error})
     end
+  end
+
+  defp wrapped_sql(sql) do
+    inner_sql =
+      sql |> String.trim_trailing() |> String.trim_trailing(";") |> String.trim_trailing()
+
+    "SELECT * FROM (\n#{inner_sql}\n) AS _pageless_outer_wrap LIMIT $1"
   end
 
   defp ok_result(%{rows: rows, columns: columns, num_rows: num_rows}, sql, max_rows, start_ms) do

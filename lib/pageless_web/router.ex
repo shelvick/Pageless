@@ -17,12 +17,19 @@ defmodule PagelessWeb.Router do
     plug(:put_secure_browser_headers)
   end
 
-  pipeline :webhooks do
-    plug(:accepts, ["json"])
+  pipeline :webhooks_public do
+    plug(PagelessWeb.Plugs.WebhookRateLimit, route_id: :webhook_alertmanager)
+    plug(PagelessWeb.Plugs.InjectPubSub)
+  end
+
+  pipeline :webhooks_signed do
+    plug(PagelessWeb.Plugs.WebhookRateLimit, route_id: :webhook_pagerduty)
+    plug(PagelessWeb.Plugs.PagerDutyHMACVerify)
     plug(PagelessWeb.Plugs.InjectPubSub)
   end
 
   pipeline :demo do
+    plug(PagelessWeb.Plugs.WebhookRateLimit, route_id: :webhook_fire_test_alert)
     plug(:accepts, ["json"])
   end
 
@@ -35,9 +42,14 @@ defmodule PagelessWeb.Router do
   end
 
   scope "/webhook", PagelessWeb do
-    pipe_through(:webhooks)
+    pipe_through(:webhooks_public)
 
     post("/alertmanager", AlertmanagerWebhookController, :create)
+  end
+
+  scope "/webhook", PagelessWeb do
+    pipe_through(:webhooks_signed)
+
     post("/pagerduty-events-v2", PagerDutyWebhookController, :create)
   end
 

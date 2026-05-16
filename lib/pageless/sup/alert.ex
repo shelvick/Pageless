@@ -13,7 +13,11 @@ defmodule Pageless.Sup.Alert do
           sandbox_owner: pid() | nil,
           audit_repo: module() | nil,
           gemini_client: module() | nil,
-          parent: pid() | nil
+          parent: pid() | nil,
+          parent_sup: pid() | nil,
+          tool_call_budget: pos_integer(),
+          idle_ttl_ms: pos_integer(),
+          env_reader: (String.t() -> String.t() | nil)
         ]
 
   @doc "Starts a supervisor for one alert envelope."
@@ -30,7 +34,7 @@ defmodule Pageless.Sup.Alert do
   @impl true
   def init(opts) do
     children = [
-      {State, opts},
+      {State, Keyword.put_new(opts, :parent_sup, self())},
       AgentSup
     ]
 
@@ -52,7 +56,8 @@ defmodule Pageless.Sup.Alert do
         audit_repo: state.audit_repo,
         gemini_client: state.gemini_client,
         parent: state.parent || self(),
-        alert_sup: alert_sup
+        alert_sup: alert_sup,
+        alert_state_pid: state_pid
       ]
       |> Keyword.merge(agent_extra_opts)
 
